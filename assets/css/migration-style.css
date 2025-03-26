@@ -1,0 +1,38 @@
+/* File tree styling */
+.file-tree ul {
+    list-style-type: none;
+    padding-left: 20px;
+}
+
+.file-tree li {
+    margin: 5px 0;
+    position: relative;
+}
+
+.folder > a.directory {
+    font-weight: bold;
+    color: #0073aa;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.file > a {
+    color: #444;
+    text-decoration: none;
+}
+
+.toggle-icon {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    text-align: center;
+    margin-right: 5px;
+    font-size: 10px;
+    line-height: 16px;
+}
+
+/* Hover effects */
+.folder > a.directory:hover,
+.file > a:hover {
+    text-decoration: underline;
+}
