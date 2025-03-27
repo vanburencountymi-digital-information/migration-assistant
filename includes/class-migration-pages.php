@@ -70,10 +70,12 @@ class Migration_Pages {
         'h5' => 'core/heading',
         'h6' => 'core/heading',
         'p' => 'core/paragraph',
+        'span' => 'core/paragraph',
+        'strong' => 'core/paragraph',
+        'em' => 'core/paragraph',
         'ul' => 'core/list',
         'ol' => 'core/list',
         'li' => 'core/list-item',
-        'a' => 'core/html',  // No direct "link block", so we use HTML
         'img' => 'core/image',
         'blockquote' => 'core/quote',
         'pre' => 'core/code'
@@ -113,73 +115,171 @@ class Migration_Pages {
         return '<p>' . trim($content) . '</p>';
     }
     
+    public static function clean_html($html) {
+        // Remove all opening <div> tags
+        $html = preg_replace('/<div[^>]*>/', '', $html);
+
+        // Remove all closing </div> tags
+        $html = preg_replace('/<\/div>/', '', $html);
+
+        // Replace multiple newlines with a single newline
+        $html = preg_replace('/\n+/', "\n", $html);
+        
+        // Try to identify and merge adjacent paragraph tags that should be a single paragraph
+        // This pattern looks for a closing </p> immediately followed by an opening <p>
+        // and replaces it with a space to join the content
+        // $html = preg_replace('/<\/p>\s*<p>/', ' ', $html);
+        
+        return $html;
+    }
+    
     public static function convert_html_to_blocks($html) {
+        // Clean the HTML before processing
+        $html = self::clean_html($html);
+
         $doc = new DOMDocument();
         libxml_use_internal_errors(true);
         $doc->loadHTML(mb_convert_encoding($html, 'HTML-ENTITIES', 'UTF-8'));
         libxml_clear_errors();
-    
+
         $blocks = [];
-        self::remove_unnecessary_divs($doc);
-    
-        foreach ($doc->getElementsByTagName('*') as $element) {
+        $xpath = new DOMXPath($doc);
+        
+        // Process block-level elements only
+        $blockElements = $xpath->query('//h1|//h2|//h3|//h4|//h5|//h6|//p|//ul|//ol|//blockquote|//pre|//img');
+        
+        foreach ($blockElements as $element) {
             $tag = strtolower($element->nodeName);
-            $content = trim($element->textContent);
-    
-            if ($content === '' || !isset(self::$block_map[$tag])) {
+            
+            // Skip if this element is a child of another block element we'll process
+            $parent = $element->parentNode;
+            $skipThisElement = false;
+            while ($parent && $parent->nodeType === XML_ELEMENT_NODE) {
+                $parentTag = strtolower($parent->nodeName);
+                if (in_array($parentTag, ['ul', 'ol', 'blockquote', 'pre'])) {
+                    $skipThisElement = true;
+                    break;
+                }
+                $parent = $parent->parentNode;
+            }
+            
+            if ($skipThisElement) {
                 continue;
             }
-    
-            $block_type = self::$block_map[$tag];
-    
-            switch ($block_type) {
-                case 'core/heading':
+            
+            switch ($tag) {
+                case 'h1':
+                case 'h2':
+                case 'h3':
+                case 'h4':
+                case 'h5':
+                case 'h6':
                     $level = str_replace('h', '', $tag);
                     $blocks[] = [
-                        'blockName' => $block_type,
+                        'blockName' => 'core/heading',
                         'attrs' => ['level' => (int)$level],
                         'innerBlocks' => [],
-                        'innerHTML' => '<' . $tag . ' class="wp-block-heading">' . $content . '</' . $tag . '>',
-                        'innerContent' => ['<' . $tag . ' class="wp-block-heading">' . $content . '</' . $tag . '>']
+                        'innerHTML' => $doc->saveHTML($element),
+                        'innerContent' => [$doc->saveHTML($element)]
                     ];
                     break;
-    
-                case 'core/paragraph':
+                    
+                case 'p':
+                    // Preserve all inline HTML within paragraphs
                     $blocks[] = [
-                        'blockName' => $block_type,
+                        'blockName' => 'core/paragraph',
                         'attrs' => [],
                         'innerBlocks' => [],
-                        'innerHTML' => self::handle_paragraph_links($element),
-                        'innerContent' => [self::handle_paragraph_links($element)]
+                        'innerHTML' => $doc->saveHTML($element),
+                        'innerContent' => [$doc->saveHTML($element)]
                     ];
                     break;
-    
-                case 'core/list':
+                    
+                case 'ul':
+                case 'ol':
                     $items = [];
                     foreach ($element->getElementsByTagName('li') as $li) {
-                        $liContent = trim($li->textContent);
-                        if ($liContent !== '') {
-                            $items[] = [
-                                'blockName' => 'core/list-item',
-                                'attrs' => [],
-                                'innerBlocks' => [],
-                                'innerHTML' => self::handle_paragraph_links($li),
-                                'innerContent' => [self::handle_paragraph_links($li)]
-                            ];
-                        }
+                        $items[] = [
+                            'blockName' => 'core/list-item',
+                            'attrs' => [],
+                            'innerBlocks' => [],
+                            'innerHTML' => $doc->saveHTML($li),
+                            'innerContent' => [$doc->saveHTML($li)]
+                        ];
                     }
+                    
                     $blocks[] = [
-                        'blockName' => $block_type,
+                        'blockName' => 'core/list',
                         'attrs' => ['ordered' => ($tag === 'ol')],
                         'innerBlocks' => $items,
                         'innerHTML' => '',
                         'innerContent' => []
                     ];
                     break;
+                    
+                case 'img':
+                    $src = $element->getAttribute('src');
+                    if (!empty($src)) {
+                        $blocks[] = [
+                            'blockName' => 'core/image',
+                            'attrs' => ['src' => esc_url($src)],
+                            'innerBlocks' => [],
+                            'innerHTML' => $doc->saveHTML($element),
+                            'innerContent' => [$doc->saveHTML($element)]
+                        ];
+                    }
+                    break;
+                    
+                case 'blockquote':
+                    $blocks[] = [
+                        'blockName' => 'core/quote',
+                        'attrs' => [],
+                        'innerBlocks' => [],
+                        'innerHTML' => $doc->saveHTML($element),
+                        'innerContent' => [$doc->saveHTML($element)]
+                    ];
+                    break;
+                    
+                case 'pre':
+                    $blocks[] = [
+                        'blockName' => 'core/code',
+                        'attrs' => [],
+                        'innerBlocks' => [],
+                        'innerHTML' => $doc->saveHTML($element),
+                        'innerContent' => [$doc->saveHTML($element)]
+                    ];
+                    break;
             }
         }
-    
-        return serialize_blocks($blocks);
+
+        // Process blocks to merge consecutive paragraphs
+        $mergedBlocks = [];
+        $currentParagraph = null;
+
+        foreach ($blocks as $block) {
+            if ($block['blockName'] === 'core/paragraph') {
+                if ($currentParagraph === null) {
+                    $currentParagraph = $block;
+                } else {
+                    // Merge paragraph content, including those with links
+                    $currentParagraph['innerHTML'] .= ' ' . $block['innerHTML'];
+                    $currentParagraph['innerContent'][0] .= ' ' . $block['innerContent'][0];
+                }
+            } else {
+                if ($currentParagraph !== null) {
+                    $mergedBlocks[] = $currentParagraph;
+                    $currentParagraph = null;
+                }
+                $mergedBlocks[] = $block;
+            }
+        }
+
+        // Add the last paragraph if it exists
+        if ($currentParagraph !== null) {
+            $mergedBlocks[] = $currentParagraph;
+        }
+
+        return serialize_blocks($mergedBlocks);
     }
     
     
@@ -199,7 +299,7 @@ class Migration_Pages {
     
         // Convert HTML to structured Gutenberg blocks
         $blocks = self::convert_html_to_blocks($cleaned_content);
-    
+        error_log("Blocks: " . $blocks);
         // Append blocks to existing content
         $existing_content = get_post_field('post_content', $page_id);
         $new_content = $existing_content . "\n\n" . $blocks;

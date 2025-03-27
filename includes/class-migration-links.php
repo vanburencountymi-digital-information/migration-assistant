@@ -57,4 +57,52 @@ class Migration_Links {
             }
         }
     }
+
+    public static function fix_all_links() {
+        global $wpdb;
+    
+        // Get all resolved links
+        $links = $wpdb->get_results("SELECT ID, old_url, new_url FROM Links WHERE new_url IS NOT NULL");
+    
+        foreach ($links as $link) {
+            $occurrences = $wpdb->get_results($wpdb->prepare(
+                "SELECT lo.New_Page_ID, np.WP_Page_ID
+                 FROM Link_Occurences lo
+                 JOIN New_Pages np ON lo.New_Page_ID = np.ID
+                 WHERE lo.Link_ID = %d",
+                $link->ID
+            ));
+    
+            foreach ($occurrences as $occurrence) {
+                $wp_page_id = intval($occurrence->WP_Page_ID);
+    
+                // Load current post content
+                $post = get_post($wp_page_id);
+                if (!$post) continue;
+    
+                // Replace old_url with new_url
+                $updated_content = str_replace($link->old_url, $link->new_url, $post->post_content);
+    
+                if ($updated_content !== $post->post_content) {
+                    wp_update_post([
+                        'ID' => $wp_page_id,
+                        'post_content' => $updated_content
+                    ]);
+    
+                    error_log("Fixed link on page ID {$wp_page_id}: {$link->old_url} → {$link->new_url}");
+                }
+            }
+        }
+    
+        error_log("Link fixing completed.");
+    }
+    
 }
+
+add_action('admin_init', function() {
+    if (isset($_GET['fix_links'])) {
+        Migration_Links::fix_all_links();
+        wp_die('Link fixing complete!');
+    }
+});
+
