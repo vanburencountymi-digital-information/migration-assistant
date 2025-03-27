@@ -208,7 +208,58 @@ class Migration_Pages {
             'ID' => $page_id,
             'post_content' => $new_content
         ]);
-    
+        
+        
+        global $wpdb;
+        // Update New_Pages record to map it to this new WordPress page
+        $new_page_row = $wpdb->get_row(
+            $wpdb->prepare("SELECT ID FROM New_Pages WHERE WP_Page_ID = %d", $page_id)
+        );
+        
+        if (!$new_page_row) {
+            $wpdb->insert('New_Pages', [
+                'WP_Page_ID' => $page_id,
+                'Title' => get_the_title($page_id),
+                'URL' => get_permalink($page_id),
+                'Status' => 'Content_Merged',
+                'Created_At' => current_time('mysql'),
+                'Updated_At' => current_time('mysql')
+            ]);
+        
+            $new_page_db_id = $wpdb->insert_id;
+        } else {
+            $new_page_db_id = $new_page_row->ID;
+        }
+
+        // Update Old_Pages record to map it to this new WordPress page
+        $file_path = MIGRATION_CLEANED_DATA . $_POST['file'];
+        if (file_exists($file_path)) {
+            $data = json_decode(file_get_contents($file_path), true);
+            if (isset($data['url'])) {
+                $url = $data['url'];
+                $wpdb->update(
+                    'Old_Pages',
+                    [
+                        'Mapped_To' => $new_page_db_id,
+                        'Status' => 'merged'
+                    ],
+                    ['URL' => $url]
+                );
+
+                error_log("Updated Old_Pages: $url → page ID $page_id");
+            } else {
+                error_log("No 'url' key found in cleaned_data file: " . $_POST['file']);
+            }
+        } else {
+            error_log("cleaned_data file not found: " . $_POST['file']);
+        }
+
+        
+        // Extract and store links
+        if (!empty($cleaned_content)) {
+            Migration_Links::extract_and_store_links($cleaned_content, $new_page_db_id);
+        }
+        
         wp_send_json_success(['message' => 'Content merged successfully']);
     }
     
