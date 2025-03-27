@@ -29,10 +29,11 @@ class Migration_Links {
             $link = $wpdb->get_row($wpdb->prepare("SELECT ID FROM Links WHERE Old_URL = %s", $href));
 
             if (!$link) {
+                $status = (strpos($href, 'vanburencountymi.gov') !== false) ? 'unresolved' : 'external';
                 $wpdb->insert('Links', [
                     'Old_URL' => $href,
                     'New_URL' => null,
-                    'Status' => 'unresolved'
+                    'Status' => $status
                 ]);
                 $link_id = $wpdb->insert_id;
             } else {
