@@ -23,24 +23,75 @@ class Migration_Links {
             $href = $anchor->getAttribute('href');
             $text = $anchor->textContent;
 
-            if (empty($href) || strpos($href, 'http') !== 0) continue; // Skip relative or malformed links
+            // Debug the raw href value
+            error_log("Processing link: " . $href);
+            
+            // Clean up any unexpected characters at the beginning
+            $href = ltrim($href, '@');
+            
+            if (empty($href) || strpos($href, 'http') !== 0) {
+                error_log("Skipping non-http link: " . $href);
+                continue; // Skip relative or malformed links
+            }
+
+            // Handle excessively long URLs (255 char limit in database)
+            $original_href = $href;
+            if (strlen($href) > 255) {
+                error_log("Warning: URL exceeds 255 characters: " . $href);
+                
+                // Option 1: Simply truncate to 255 chars
+                // $href = substr($href, 0, 255);
+                
+                // Option 2: Store a hash of the URL instead
+                $href_hash = md5($href);
+                $href = "URL_HASH:" . $href_hash;
+                
+                // Store the full URL in a separate option for reference
+                $long_urls = get_option('migration_long_urls', []);
+                $long_urls[$href_hash] = $original_href;
+                update_option('migration_long_urls', $long_urls);
+                
+                error_log("Stored long URL with hash: " . $href_hash);
+            }
 
             // Insert or retrieve link ID from Links table
             $link = $wpdb->get_row($wpdb->prepare("SELECT ID FROM Links WHERE Old_URL = %s", $href));
 
             if (!$link) {
-                $status = 'external';
-                if (strpos($href, 'vanburencountymi.gov') !== false) {
+                $type = 'external';
+                $status = 'resolved';
+                
+                // Use case-insensitive matching
+                if (stripos($href, 'DocumentCenter') !== false) {
+                    error_log("URL matched DocumentCenter: " . $href);
+                    $type = 'document';
                     $status = 'unresolved';
-                } elseif (strpos($href, 'documentcenter') !== false) {
-                    $status = 'document';
+                } elseif (stripos($href, 'FormCenter') !== false) {
+                    error_log("URL matched FormCenter: " . $href);
+                    $type = 'form';
+                    $status = 'unresolved';
+                } elseif (stripos($href, 'vanburencountymi.gov') !== false) {
+                    error_log("URL matched vanburencountymi.gov: " . $href);
+                    $type = 'internal';
+                    $status = 'unresolved';
                 }
                 
-                $wpdb->insert('Links', [
+                // Debug the values before insert
+                error_log("Inserting link with Type: " . $type . ", Status: " . $status);
+                
+                // Make sure all fields are explicitly included in the insert
+                $insert_result = $wpdb->insert('Links', [
                     'Old_URL' => $href,
                     'New_URL' => null,
-                    'Status' => $status
+                    'Status' => $status,
+                    'Type' => $type
                 ]);
+                
+                // Check if insert was successful
+                if ($insert_result === false) {
+                    error_log("Database insert error: " . $wpdb->last_error);
+                }
+                
                 $link_id = $wpdb->insert_id;
             } else {
                 $link_id = $link->ID;

@@ -263,10 +263,13 @@ class Migration_Pages {
     
     public static function convert_html_to_blocks($html, $file_path) {
         $use_ai_rewrites = defined('USE_AI_REWRITES') && USE_AI_REWRITES;
+        error_log("Converting HTML to blocks for: " . $file_path);
+        error_log("Using AI rewrites: " . $use_ai_rewrites);
         // Clean the HTML before processing
         $html = self::clean_html($html);
 
         if ($use_ai_rewrites) {
+            error_log("Using AI rewrites for: " . $file_path);
             $html = self::get_or_rewrite_with_ai($file_path, $html);
         }
 
