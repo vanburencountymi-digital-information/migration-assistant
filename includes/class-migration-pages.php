@@ -166,35 +166,40 @@ class Migration_Pages {
         
         return $html;
     }
-    
     public static function rewrite_with_ai($html) {
         $api_key = defined('OPENAI_API_KEY') ? OPENAI_API_KEY : null;
     
         if (!$api_key) {
             error_log("Missing OpenAI API key. Define OPENAI_API_KEY.");
-            return $html; // Fail gracefully
+            return $html;
         }
     
-        $endpoint = 'https://api.openai.com/v1/chat/completions';
+        $endpoint = 'https://api.openai.com/v1/responses';
     
-        // You can fine-tune this system prompt to guide tone, reading level, etc.
-        $system_prompt = <<<EOT
-    You are a professional web content editor for a local government website.
-    Rewrite the following HTML content to:
-    - Use a clear, friendly, and consistent tone
-    - Improve readability and accessibility (aim for grade 9 reading level)
-    - Keep or restructure headings for clarity and navigation
-    - Preserve any valid HTML and return it as cleaned, structured HTML
-    
-    Only return the revised HTML — do not include commentary or explanation.
-    EOT;
+        $instructions = <<<EOT
+        You are a web content editor for a local government website.
+        
+        Your job is to:
+        - Rewrite the content to be clear, friendly, warm, and welcoming, while maintaining a professional tone appropriate for a government audience
+        - Aim for a 9th grade reading level using plain language and short, active sentences
+        - Improve accessibility for users with cognitive, visual, or language-based disabilities
+        - Use descriptive and concise section headings to improve readability and navigation
+        - Preserve or enhance the semantic HTML structure (e.g., use <section>, <h1>-<h3>, <p>, <ul>, <a>, etc. appropriately)
+        - Remove unnecessary inline styles or extra classes; return clean, minimal HTML only
+        - Do not include explanations or commentary—only return the revised HTML content
+        
+        Follow the principles of inclusive, client-centered communication. Help all users feel respected, supported, and informed.
+        
+        EOT;
+        
     
         $payload = [
-            'model' => 'gpt-4',
+            'model' => 'gpt-4o',
+            'input' => $html,
+            'instructions' => $instructions,
             'temperature' => 0.4,
-            'messages' => [
-                ['role' => 'system', 'content' => $system_prompt],
-                ['role' => 'user', 'content' => $html]
+            'text' => [
+                'format' => ['type' => 'text']
             ]
         ];
     
@@ -212,29 +217,58 @@ class Migration_Pages {
             return $html;
         }
     
-        $status_code = wp_remote_retrieve_response_code($response);
+        $status = wp_remote_retrieve_response_code($response);
         $body = wp_remote_retrieve_body($response);
     
-        if ($status_code !== 200) {
-            error_log("OpenAI API returned non-200 status: $status_code — Response body: $body");
+        if ($status !== 200) {
+            error_log("Non-200 status from OpenAI API: $status. Body: $body");
             return $html;
         }
     
         $data = json_decode($body, true);
     
-        if (!isset($data['choices'][0]['message']['content'])) {
-            error_log("Unexpected response structure from OpenAI: " . print_r($data, true));
+        if (
+            !isset($data['output'][0]['content'][0]['text']) ||
+            $data['output'][0]['type'] !== 'message'
+        ) {
+            error_log("Unexpected OpenAI response structure: " . print_r($data, true));
             return $html;
         }
     
-        $rewritten = trim($data['choices'][0]['message']['content']);
-        error_log("Successfully received rewritten content from OpenAI");
+        $rewritten = trim($data['output'][0]['content'][0]['text']);
+        error_log("Successfully received rewritten content via /v1/responses");
+    
         return $rewritten;
     }
     
-    public static function convert_html_to_blocks($html) {
+
+    public static function get_or_rewrite_with_ai($file_path, $cleaned_content) {
+        $data = json_decode(file_get_contents($file_path), true);
+    
+        if (isset($data['rewritten_content']) && !empty($data['rewritten_content'])) {
+            error_log("Using cached rewritten content for: " . $file_path);
+            return $data['rewritten_content'];
+        }
+    
+        error_log("Calling OpenAI API to rewrite content for: " . $file_path);
+        $rewritten = self::rewrite_with_ai($cleaned_content);
+    
+        // Save rewritten content back to content.json
+        $data['rewritten_content'] = $rewritten;
+        file_put_contents($file_path, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    
+        return $rewritten;
+    }
+    
+    
+    public static function convert_html_to_blocks($html, $file_path) {
+        $use_ai_rewrites = defined('USE_AI_REWRITES') && USE_AI_REWRITES;
         // Clean the HTML before processing
         $html = self::clean_html($html);
+
+        if ($use_ai_rewrites) {
+            $html = self::get_or_rewrite_with_ai($file_path, $html);
+        }
 
         $doc = new DOMDocument();
         libxml_use_internal_errors(true);
@@ -505,8 +539,10 @@ class Migration_Pages {
         $title = isset($data['title']) ? $data['title'] : 'Untitled';
         $cleaned_content = isset($data['cleaned_content']) ? $data['cleaned_content'] : '';
         
-        // Convert HTML to structured Gutenberg blocks
-        $blocks = self::convert_html_to_blocks($cleaned_content);
+
+        
+        $blocks = self::convert_html_to_blocks($cleaned_content, $file_path);
+
         
         $new_page_db_id = null;
         
@@ -646,7 +682,7 @@ class Migration_Pages {
             
                 $new_subpage_id = wp_insert_post([
                     'post_title' => $subpage_title,
-                    'post_content' => self::convert_html_to_blocks($subpage_content),
+                    'post_content' => self::convert_html_to_blocks($subpage_content, $subpage_file),
                     'post_status' => 'publish',
                     'post_parent' => $parent_page_id,
                     'post_type' => 'page'
