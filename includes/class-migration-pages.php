@@ -164,12 +164,72 @@ class Migration_Pages {
         // Replace multiple newlines with a single newline
         $html = preg_replace('/\n+/', "\n", $html);
         
-        // Try to identify and merge adjacent paragraph tags that should be a single paragraph
-        // This pattern looks for a closing </p> immediately followed by an opening <p>
-        // and replaces it with a space to join the content
-        // $html = preg_replace('/<\/p>\s*<p>/', ' ', $html);
-        
         return $html;
+    }
+    
+    public static function rewrite_with_ai($html) {
+        $api_key = defined('OPENAI_API_KEY') ? OPENAI_API_KEY : null;
+    
+        if (!$api_key) {
+            error_log("Missing OpenAI API key. Define OPENAI_API_KEY.");
+            return $html; // Fail gracefully
+        }
+    
+        $endpoint = 'https://api.openai.com/v1/chat/completions';
+    
+        // You can fine-tune this system prompt to guide tone, reading level, etc.
+        $system_prompt = <<<EOT
+    You are a professional web content editor for a local government website.
+    Rewrite the following HTML content to:
+    - Use a clear, friendly, and consistent tone
+    - Improve readability and accessibility (aim for grade 9 reading level)
+    - Keep or restructure headings for clarity and navigation
+    - Preserve any valid HTML and return it as cleaned, structured HTML
+    
+    Only return the revised HTML — do not include commentary or explanation.
+    EOT;
+    
+        $payload = [
+            'model' => 'gpt-4',
+            'temperature' => 0.4,
+            'messages' => [
+                ['role' => 'system', 'content' => $system_prompt],
+                ['role' => 'user', 'content' => $html]
+            ]
+        ];
+    
+        $response = wp_remote_post($endpoint, [
+            'headers' => [
+                'Authorization' => 'Bearer ' . $api_key,
+                'Content-Type'  => 'application/json',
+            ],
+            'body' => json_encode($payload),
+            'timeout' => 60,
+        ]);
+    
+        if (is_wp_error($response)) {
+            error_log("OpenAI API request failed: " . $response->get_error_message());
+            return $html;
+        }
+    
+        $status_code = wp_remote_retrieve_response_code($response);
+        $body = wp_remote_retrieve_body($response);
+    
+        if ($status_code !== 200) {
+            error_log("OpenAI API returned non-200 status: $status_code — Response body: $body");
+            return $html;
+        }
+    
+        $data = json_decode($body, true);
+    
+        if (!isset($data['choices'][0]['message']['content'])) {
+            error_log("Unexpected response structure from OpenAI: " . print_r($data, true));
+            return $html;
+        }
+    
+        $rewritten = trim($data['choices'][0]['message']['content']);
+        error_log("Successfully received rewritten content from OpenAI");
+        return $rewritten;
     }
     
     public static function convert_html_to_blocks($html) {
