@@ -172,8 +172,18 @@ document.addEventListener('DOMContentLoaded', function() {
                     
                     if (response.success) {
                         alert("Content processed successfully! Created " + response.data.count + " subpages.");
-                        location.reload();
-                    } else if (response.data && response.data.can_clear) {
+                    
+                        // Optional: prevent reload for now so user can see the tree
+                        // location.reload();
+                    
+                        // Show subpage tree
+                        const container = document.getElementById("subpage-tree-list");
+                        if (container) {
+                            container.innerHTML = ''; // Clear existing content
+                            renderTree(response.data.tree, container);
+                        }
+                    }
+                     else if (response.data && response.data.can_clear) {
                         // This is a lock error that we can clear
                         if (confirm(response.data.message + "\n\nWould you like to clear the lock and try again?")) {
                             clearLock(filePath);
@@ -236,4 +246,18 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+    function renderTree(tree, container, depth = 0) {
+        tree.forEach(node => {
+            const li = document.createElement("li");
+            li.textContent = `${"—".repeat(depth)} ${node.title}`;
+            container.appendChild(li);
+    
+            if (node.children && node.children.length > 0) {
+                const ul = document.createElement("ul");
+                container.appendChild(ul);
+                renderTree(node.children, ul, depth + 1);
+            }
+        });
+    }
+    
 });

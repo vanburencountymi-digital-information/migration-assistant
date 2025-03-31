@@ -72,6 +72,11 @@ class Migration_Pages {
         // Merge Content Button
         echo '<button id="merge-content" data-file="' . esc_attr($relative_path) . '">Merge Content</button>';
         
+        echo '<div id="subpage-tree-container" style="margin-top: 20px;">';
+        echo '<h3>Subpages Created</h3>';
+        echo '<ul id="subpage-tree-list"></ul>';
+        echo '</div>';
+
         // Add JavaScript for handling the new page option
         ?>
         <script>
@@ -268,9 +273,11 @@ class Migration_Pages {
         // Clean the HTML before processing
         $html = self::clean_html($html);
 
-        if ($use_ai_rewrites) {
+        if ($use_ai_rewrites && !empty(trim($html))) {
             error_log("Using AI rewrites for: " . $file_path);
             $html = self::get_or_rewrite_with_ai($file_path, $html);
+        } elseif ($use_ai_rewrites) {
+            error_log("Skipping AI rewrite for empty content: " . $file_path);
         }
 
         $doc = new DOMDocument();
@@ -511,17 +518,33 @@ class Migration_Pages {
             $_SESSION[$lock_key] = true;
             
             try {
-                $result = self::process_subpages($parent_page_id, $_POST['file'], $template);
-                
+                $tree = self::process_subpages($parent_page_id, $_POST['file'], $template);
+
                 // Release the lock
                 $_SESSION[$lock_key] = false;
                 
-                if (is_wp_error($result)) {
-                    wp_send_json_error(['message' => $result->get_error_message()]);
+                if (is_wp_error($tree)) {
+                    wp_send_json_error(['message' => $tree->get_error_message()]);
                     return;
                 }
                 
-                wp_send_json_success(['message' => 'Subpages processed successfully', 'count' => $result]);
+                // Optionally count the number of pages processed
+                function count_tree_nodes($nodes) {
+                    $count = 0;
+                    foreach ($nodes as $node) {
+                        $count += 1 + count_tree_nodes($node['children'] ?? []);
+                    }
+                    return $count;
+                }
+                
+                $total_count = count_tree_nodes($tree);
+                
+                wp_send_json_success([
+                    'message' => 'Subpages processed successfully',
+                    'count' => $total_count,
+                    'tree' => $tree
+                ]);
+                
             } catch (Exception $e) {
                 // Release the lock in case of error
                 $_SESSION[$lock_key] = false;
@@ -656,98 +679,183 @@ class Migration_Pages {
             'new_page_db_id' => $new_page_db_id
         ];
     }
-
-    /**
-     * Process subpages for a parent page
-     */
-    private static function process_subpages($parent_page_id, $parent_file_path, $template) {
+    //Process subpages recursively
+    private static function process_subpages($parent_page_id, $parent_file_path, $template, $depth = 0) {
         global $wpdb;
-        $subpages = self::find_subpages($parent_file_path);
-        $processed_count = 0;
-        
-        if (empty($subpages)) {
-            error_log("No subpages found to process");
-            return 0;
+    
+        if ($depth > MIGRATION_MAX_DEPTH) {
+            error_log("Max recursion depth reached at: $parent_file_path");
+            return [];
         }
-        
-        error_log("Found " . count($subpages) . " subpages to process");
-        
+    
+        $subpages = self::find_subpages($parent_file_path);
+        $tree = [];
+    
+        if (empty($subpages)) {
+            error_log(str_repeat('  ', $depth) . "No subpages for: $parent_file_path");
+            return [];
+        }
+    
         foreach ($subpages as $subpage_path) {
             $subpage_file = MIGRATION_CLEANED_DATA . $subpage_path;
-            error_log("Processing subpage: " . $subpage_file);
-            
-            if (file_exists($subpage_file)) {
-                $subpage_data = json_decode(file_get_contents($subpage_file), true);
-                $subpage_title = isset($subpage_data['title']) ? $subpage_data['title'] : 'Untitled Subpage';
-                error_log("Subpage title: " . $subpage_title);
-                
-                $subpage_content = isset($subpage_data['cleaned_content']) ? $subpage_data['cleaned_content'] : '';
-            
-                $new_subpage_id = wp_insert_post([
-                    'post_title' => $subpage_title,
-                    'post_content' => self::convert_html_to_blocks($subpage_content, $subpage_file),
-                    'post_status' => 'publish',
-                    'post_parent' => $parent_page_id,
-                    'post_type' => 'page'
-                ]);
-                
-                if (is_wp_error($new_subpage_id)) {
-                    error_log("Error creating subpage: " . $new_subpage_id->get_error_message());
-                    continue;
-                }
-                
-                error_log("Created subpage with ID: " . $new_subpage_id);
-            
-                if ($template) {
-                    update_post_meta($new_subpage_id, '_wp_page_template', $template);
-                    error_log("Applied template to subpage: " . $template);
-                }
-                
-                // Update the subpage in the database tables
-                if ($new_subpage_id) {
-                    $wpdb->insert('New_Pages', [
-                        'WP_Page_ID' => $new_subpage_id,
-                        'Title' => $subpage_title,
-                        'URL' => get_permalink($new_subpage_id),
-                        'Status' => 'Subpage_Created',
-                        'Created_At' => current_time('mysql'),
-                        'Updated_At' => current_time('mysql')
-                    ]);
-                    
-                    $new_subpage_db_id = $wpdb->insert_id;
-                    error_log("Inserted subpage into New_Pages table with ID: " . $new_subpage_db_id);
-                    
-                    // Extract and store links from the subpage content
-                    if (!empty($subpage_content)) {
-                        error_log("Extracting links from subpage: " . $subpage_title);
-                        Migration_Links::extract_and_store_links($subpage_content, $new_subpage_db_id);
-                    }
-                    
-                    // Update Old_Pages if URL exists
-                    if (isset($subpage_data['url'])) {
-                        $wpdb->update(
-                            'Old_Pages',
-                            [
-                                'Mapped_To' => $new_subpage_db_id,
-                                'Status' => 'subpage_created'
-                            ],
-                            ['URL' => $subpage_data['url']]
-                        );
-                        
-                        error_log("Updated Old_Pages for subpage: " . $subpage_data['url'] . " → page ID " . $new_subpage_id);
-                    } else {
-                        error_log("No 'url' key found in subpage file: " . $subpage_path);
-                    }
-                    
-                    $processed_count++;
-                }
-            } else {
-                error_log("Subpage file does not exist: " . $subpage_file);
+    
+            if (!file_exists($subpage_file)) continue;
+    
+            $subpage_data = json_decode(file_get_contents($subpage_file), true);
+            $subpage_title = $subpage_data['title'] ?? 'Untitled Subpage';
+            $subpage_content = $subpage_data['cleaned_content'] ?? '';
+    
+            error_log(str_repeat('  ', $depth) . "Creating: $subpage_title");
+    
+            $converted_blocks = self::convert_html_to_blocks($subpage_content, $subpage_file);
+    
+            $new_subpage_id = wp_insert_post([
+                'post_title'   => $subpage_title,
+                'post_content' => $converted_blocks,
+                'post_status'  => 'publish',
+                'post_parent'  => $parent_page_id,
+                'post_type'    => 'page'
+            ]);
+    
+            if (is_wp_error($new_subpage_id)) {
+                error_log("Error creating subpage: " . $new_subpage_id->get_error_message());
+                continue;
             }
+    
+            if (!empty($template)) {
+                update_post_meta($new_subpage_id, '_wp_page_template', $template);
+            }
+    
+            $wpdb->insert('New_Pages', [
+                'WP_Page_ID' => $new_subpage_id,
+                'Title' => $subpage_title,
+                'URL' => get_permalink($new_subpage_id),
+                'Status' => 'Subpage_Created',
+                'Created_At' => current_time('mysql'),
+                'Updated_At' => current_time('mysql')
+            ]);
+    
+            $new_subpage_db_id = $wpdb->insert_id;
+    
+            if (!empty($subpage_content)) {
+                Migration_Links::extract_and_store_links($subpage_content, $new_subpage_db_id);
+            }
+    
+            if (isset($subpage_data['url'])) {
+                $wpdb->update(
+                    'Old_Pages',
+                    ['Mapped_To' => $new_subpage_db_id, 'Status' => 'subpage_created'],
+                    ['URL' => $subpage_data['url']]
+                );
+            }
+    
+            // 🔁 RECURSE
+            $children = self::process_subpages($new_subpage_id, $subpage_path, $template, $depth + 1);
+    
+            // Build tree node
+            $tree[] = [
+                'title' => $subpage_title,
+                'id'    => $new_subpage_id,
+                'depth' => $depth,
+                'path'  => $subpage_path,
+                'children' => $children
+            ];
         }
-        
-        return $processed_count;
+    
+        return $tree;
     }
+    
+    /**
+     * Process subpages for a parent page NON-RECURSIVE
+     */
+    // private static function process_subpages($parent_page_id, $parent_file_path, $template) {
+    //     global $wpdb;
+    //     $subpages = self::find_subpages($parent_file_path);
+    //     $processed_count = 0;
+        
+    //     if (empty($subpages)) {
+    //         error_log("No subpages found to process");
+    //         return 0;
+    //     }
+        
+    //     error_log("Found " . count($subpages) . " subpages to process");
+        
+    //     foreach ($subpages as $subpage_path) {
+    //         $subpage_file = MIGRATION_CLEANED_DATA . $subpage_path;
+    //         error_log("Processing subpage: " . $subpage_file);
+            
+    //         if (file_exists($subpage_file)) {
+    //             $subpage_data = json_decode(file_get_contents($subpage_file), true);
+    //             $subpage_title = isset($subpage_data['title']) ? $subpage_data['title'] : 'Untitled Subpage';
+    //             error_log("Subpage title: " . $subpage_title);
+                
+    //             $subpage_content = isset($subpage_data['cleaned_content']) ? $subpage_data['cleaned_content'] : '';
+            
+    //             $new_subpage_id = wp_insert_post([
+    //                 'post_title' => $subpage_title,
+    //                 'post_content' => self::convert_html_to_blocks($subpage_content, $subpage_file),
+    //                 'post_status' => 'publish',
+    //                 'post_parent' => $parent_page_id,
+    //                 'post_type' => 'page'
+    //             ]);
+                
+    //             if (is_wp_error($new_subpage_id)) {
+    //                 error_log("Error creating subpage: " . $new_subpage_id->get_error_message());
+    //                 continue;
+    //             }
+                
+    //             error_log("Created subpage with ID: " . $new_subpage_id);
+            
+    //             if ($template) {
+    //                 update_post_meta($new_subpage_id, '_wp_page_template', $template);
+    //                 error_log("Applied template to subpage: " . $template);
+    //             }
+                
+    //             // Update the subpage in the database tables
+    //             if ($new_subpage_id) {
+    //                 $wpdb->insert('New_Pages', [
+    //                     'WP_Page_ID' => $new_subpage_id,
+    //                     'Title' => $subpage_title,
+    //                     'URL' => get_permalink($new_subpage_id),
+    //                     'Status' => 'Subpage_Created',
+    //                     'Created_At' => current_time('mysql'),
+    //                     'Updated_At' => current_time('mysql')
+    //                 ]);
+                    
+    //                 $new_subpage_db_id = $wpdb->insert_id;
+    //                 error_log("Inserted subpage into New_Pages table with ID: " . $new_subpage_db_id);
+                    
+    //                 // Extract and store links from the subpage content
+    //                 if (!empty($subpage_content)) {
+    //                     error_log("Extracting links from subpage: " . $subpage_title);
+    //                     Migration_Links::extract_and_store_links($subpage_content, $new_subpage_db_id);
+    //                 }
+                    
+    //                 // Update Old_Pages if URL exists
+    //                 if (isset($subpage_data['url'])) {
+    //                     $wpdb->update(
+    //                         'Old_Pages',
+    //                         [
+    //                             'Mapped_To' => $new_subpage_db_id,
+    //                             'Status' => 'subpage_created'
+    //                         ],
+    //                         ['URL' => $subpage_data['url']]
+    //                     );
+                        
+    //                     error_log("Updated Old_Pages for subpage: " . $subpage_data['url'] . " → page ID " . $new_subpage_id);
+    //                 } else {
+    //                     error_log("No 'url' key found in subpage file: " . $subpage_path);
+    //                 }
+                    
+    //                 $processed_count++;
+    //             }
+    //         } else {
+    //             error_log("Subpage file does not exist: " . $subpage_file);
+    //         }
+    //     }
+        
+    //     return $processed_count;
+    // }
     
     public static function build_subpages() {
         $parent_id = intval($_POST['parent_id']);
