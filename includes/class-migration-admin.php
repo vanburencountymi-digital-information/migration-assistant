@@ -35,6 +35,15 @@ class Migration_Admin {
             true
         );
     
+        // Enqueue migration pages script
+        wp_enqueue_script(
+            'migration-pages-js', 
+            plugins_url('../assets/js/migration-pages.js', __FILE__), 
+            array('jquery'), 
+            filemtime(plugin_dir_path(__FILE__) . '../assets/js/migration-pages.js'), 
+            true
+        );
+    
         // Enqueue custom styles
         wp_enqueue_style(
             'migration-style', 
