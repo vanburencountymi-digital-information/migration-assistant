@@ -206,3 +206,11 @@ add_action('admin_init', function() {
     }
 });
 
+add_action('admin_init', function() {
+    if (isset($_GET['generate_links'])) {
+        Migration_Links::generate_internal_link_mappings();
+        wp_die('Internal link mapping complete!');
+    }
+});
+
+
