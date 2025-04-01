@@ -730,7 +730,7 @@ class Migration_Pages {
                 'WP_Page_ID' => $new_subpage_id,
                 'Title' => $subpage_title,
                 'URL' => get_permalink($new_subpage_id),
-                'Status' => 'Subpage_Created',
+                'Status' => 'merged',
                 'Created_At' => current_time('mysql'),
                 'Updated_At' => current_time('mysql')
             ]);
@@ -744,7 +744,7 @@ class Migration_Pages {
             if (isset($subpage_data['url'])) {
                 $wpdb->update(
                     'Old_Pages',
-                    ['Mapped_To' => $new_subpage_db_id, 'Status' => 'subpage_created'],
+                    ['Mapped_To' => $new_subpage_db_id, 'Status' => 'merged'],
                     ['URL' => $subpage_data['url']]
                 );
             }
