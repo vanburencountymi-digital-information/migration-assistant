@@ -114,7 +114,50 @@ class Migration_Links {
             }
         }
     }
-
+    public static function generate_internal_link_mappings() {
+        global $wpdb;
+    
+        // Get internal links that don't yet have a New_URL
+        $internal_links = $wpdb->get_results("SELECT * FROM Links WHERE Type = 'internal' AND New_URL IS NULL");
+    
+        foreach ($internal_links as $link) {
+            $old_url = $link->Old_URL;
+    
+            // Try to find a matching Old_Page
+            $old_page = $wpdb->get_row($wpdb->prepare(
+                "SELECT * FROM Old_Pages WHERE Old_URL = %s AND Mapped_To IS NOT NULL",
+                $old_url
+            ));
+    
+            if ($old_page) {
+                $new_page = $wpdb->get_row($wpdb->prepare(
+                    "SELECT WP_Page_ID FROM New_Pages WHERE ID = %d",
+                    $old_page->Mapped_To
+                ));
+    
+                if ($new_page && $new_page->WP_Page_ID) {
+                    $relative_path = get_permalink($new_page->WP_Page_ID);
+                    if ($relative_path) {
+                        // Strip domain from permalink to make it relative
+                        $parsed = wp_parse_url($relative_path);
+                        $path = isset($parsed['path']) ? $parsed['path'] : '/';
+    
+                        // Update the Links table with this relative path
+                        $wpdb->update(
+                            'Links',
+                            ['New_URL' => $path],
+                            ['ID' => $link->ID]
+                        );
+    
+                        error_log("Mapped internal link: {$old_url} → {$path}");
+                    }
+                }
+            }
+        }
+    
+        error_log("Finished generating internal New_URLs.");
+    }
+    
     public static function fix_all_links() {
         global $wpdb;
     
