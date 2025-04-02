@@ -41,11 +41,22 @@ class Migration_Templates {
     }
 
     public static function display_template_selection($relative_path) {
-        echo '<label>Select Template:</label>';
-        echo '<select id="page_template">';
-        foreach (self::get_available_templates() as $key => $name) {
-            echo '<option value="' . esc_attr($key) . '">' . esc_html($name) . '</option>';
+        $subpage_tree = Migration_Pages::build_subpage_tree($relative_path);
+        $max_depth = Migration_Pages::get_max_tree_depth($subpage_tree);
+
+        for ($level = 0; $level <= $max_depth; $level++) {
+            echo '<div class="template-selection-level">';
+            echo '<label for="page_template_' . $level . '">Select Template for Level ' . $level . ':</label>';
+            echo '<select id="page_template_' . $level . '" class="page_template_dropdown" data-level="' . $level . '">';
+            
+            // Use your available templates
+            foreach (Migration_Templates::get_available_templates() as $key => $name) {
+                echo '<option value="' . esc_attr($key) . '">' . esc_html($name) . '</option>';
+            }
+            
+            echo '</select>';
+            echo '</div>';
         }
-        echo '</select>';
+
     }
 }

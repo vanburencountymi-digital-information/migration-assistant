@@ -1045,6 +1045,31 @@ class Migration_Pages {
         
         return $count;
     }
+
+    /**
+     * Calculate the maximum depth of the subpage tree
+     * 
+     * @param array $tree The subpage tree structure
+     * @return int Maximum depth of the tree
+     */
+    public static function get_max_tree_depth($tree) {
+        $max_depth = 0;
+        
+        foreach ($tree as $node) {
+            // If this node has children, calculate their depth
+            if (!empty($node['children'])) {
+                // Get the max depth of children and add 1 for this level
+                $child_depth = 1 + self::get_max_tree_depth($node['children']);
+                // Update max_depth if this branch is deeper
+                $max_depth = max($max_depth, $child_depth);
+            } else {
+                // Leaf nodes have depth of 0 in children, but we count this level
+                $max_depth = max($max_depth, 1);
+            }
+        }
+        
+        return $max_depth;
+    }
 }
 add_action('wp_ajax_merge_content', array('Migration_Pages', 'merge_content_into_page'));
 add_action('wp_ajax_build_subpages', array('Migration_Pages', 'build_subpages'));
