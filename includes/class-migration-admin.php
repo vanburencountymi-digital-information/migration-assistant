@@ -4,6 +4,8 @@ class Migration_Admin {
     public function __construct() {
         add_action('admin_menu', array($this, 'add_menu'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_scripts'));
+        add_action('admin_init', array($this, 'handle_tools_form'));
+
     }
 
     public function add_menu() {
@@ -17,7 +19,25 @@ class Migration_Admin {
             80
         );
     }
-
+    public function handle_tools_form() {
+        if (!current_user_can('manage_options')) return;
+        if (!isset($_POST['_wpnonce']) || !wp_verify_nonce($_POST['_wpnonce'], 'run_migration_tools')) return;
+    
+        if (isset($_POST['generate_internal_links'])) {
+            Migration_Links::generate_internal_link_mappings();
+            add_action('admin_notices', function() {
+                echo '<div class="notice notice-success"><p>Internal link mappings generated.</p></div>';
+            });
+        }
+    
+        if (isset($_POST['fix_all_links'])) {
+            Migration_Links::fix_all_links();
+            add_action('admin_notices', function() {
+                echo '<div class="notice notice-success"><p>All internal links have been updated in post content.</p></div>';
+            });
+        }
+    }
+    
     public function enqueue_scripts($hook) {
         if ($hook != 'toplevel_page_migration-assistant') {
             return;
@@ -66,9 +86,28 @@ class Migration_Admin {
         
         // Add inline styles
         echo '<style>
-            #ma-container { display: flex; }
-            #ma-menu { width: 30%; padding-right: 20px; }
-            #ma-content { width: 70%; }
+            #ma-container { 
+                display: flex; 
+                margin-bottom: 20px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                overflow: hidden;
+                height: 600px; /* Fixed height container */
+            }
+            #ma-menu { 
+                width: 30%; 
+                padding: 15px;
+                border-right: 1px solid #ddd;
+                overflow: auto; /* Scrollable */
+                height: 100%;
+                background: #f9f9f9;
+            }
+            #ma-content { 
+                width: 70%; 
+                padding: 15px;
+                overflow: auto; /* Scrollable */
+                height: 100%;
+            }
             
             /* File tree styling */
             .folder > ul { margin-left: 20px; }
@@ -98,6 +137,15 @@ class Migration_Admin {
             .file > a:hover {
                 text-decoration: underline;
             }
+            
+            /* Tools section styling */
+            .tools-section {
+                margin-top: 20px;
+                padding: 15px;
+                background: #fff;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }
         </style>';
         
         echo '<div id="ma-container">';
@@ -109,15 +157,26 @@ class Migration_Admin {
         
         echo '<div id="ma-content">';
         if (isset($_GET['file'])) {
-            Migration_Pages::display_file(urldecode($_GET['file']));
             echo '<p>File: ' . urldecode($_GET['file']) . '</p>';
+            Migration_Pages::display_file(urldecode($_GET['file']));
         } else {
             echo '<p>Select a folder to view its content.</p>';
         }
-        echo '</div>';
+        echo '</div>'; // closes ma-content
+        echo '</div>'; // closes ma-container
+        
+        // Tools section
+        echo '<div class="tools-section">';
+        echo '<h2>Link Management Tools</h2>';
+        echo '<form method="post">';
+        wp_nonce_field('run_migration_tools');
 
-        echo '</div>';
-        echo '</div>';
+        echo '<p><button type="submit" name="generate_internal_links" class="button button-primary">Generate Internal Link Mappings</button></p>';
+        echo '<p><button type="submit" name="fix_all_links" class="button button-secondary">Fix All Links in Page Content</button></p>';
+        echo '</form>';
+        echo '</div>'; // closes tools-section
+
+        echo '</div>'; // closes .wrap
     }
 }
 
