@@ -119,39 +119,91 @@ class Migration_Links {
     
         // Get internal links that don't yet have a New_URL
         $internal_links = $wpdb->get_results("SELECT * FROM Links WHERE Type = 'internal' AND New_URL IS NULL");
-    
+        error_log("Found " . count($internal_links) . " internal links to process.");
+        
         foreach ($internal_links as $link) {
             $old_url = $link->Old_URL;
-    
-            // Try to find a matching Old_Page
-            $old_page = $wpdb->get_row($wpdb->prepare(
-                "SELECT * FROM Old_Pages WHERE Old_URL = %s AND Mapped_To IS NOT NULL",
-                $old_url
-            ));
-    
-            if ($old_page) {
-                $new_page = $wpdb->get_row($wpdb->prepare(
-                    "SELECT WP_Page_ID FROM New_Pages WHERE ID = %d",
-                    $old_page->Mapped_To
+            error_log("Processing Old_URL: " . $old_url);
+            
+            // Normalize URLs to handle the extra slash issue
+            // Create variations of the URL to try matching
+            $url_variations = [
+                $old_url,
+                rtrim($old_url, '/'),
+                rtrim($old_url, '/') . '/',
+                preg_replace('~(https?://[^/]+)/~', '$1', $old_url),  // Remove slash after domain
+                preg_replace('~(https?://[^/]+)~', '$1/', $old_url)   // Add slash after domain
+            ];
+            
+            $old_page = null;
+            
+            // Try each URL variation until we find a match
+            foreach ($url_variations as $url_variant) {
+                $old_page = $wpdb->get_row($wpdb->prepare(
+                    "SELECT * FROM Old_Pages WHERE URL = %s AND Mapped_To IS NOT NULL",
+                    $url_variant
                 ));
-    
-                if ($new_page && $new_page->WP_Page_ID) {
-                    $relative_path = get_permalink($new_page->WP_Page_ID);
-                    if ($relative_path) {
-                        // Strip domain from permalink to make it relative
-                        $parsed = wp_parse_url($relative_path);
-                        $path = isset($parsed['path']) ? $parsed['path'] : '/';
-    
-                        // Update the Links table with this relative path
-                        $wpdb->update(
-                            'Links',
-                            ['New_URL' => $path],
-                            ['ID' => $link->ID]
-                        );
-    
-                        error_log("Mapped internal link: {$old_url} → {$path}");
-                    }
+                
+                if ($old_page) {
+                    error_log("Found match with URL variant: " . $url_variant);
+                    break;
                 }
+            }
+            
+            if (!$old_page) {
+                error_log("No matching Old_Page found for any URL variant of: " . $old_url);
+                
+                // Mark this link as broken
+                $wpdb->update(
+                    'Links',
+                    [
+                        'Status' => 'broken',
+                        'New_URL' => '#broken-link'  // Special marker for broken links
+                    ],
+                    ['ID' => $link->ID]
+                );
+                
+                continue;
+            }
+            
+            $new_page = $wpdb->get_row($wpdb->prepare(
+                "SELECT WP_Page_ID FROM New_Pages WHERE ID = %d",
+                $old_page->Mapped_To
+            ));
+            
+            if (!$new_page || !$new_page->WP_Page_ID) {
+                error_log("No matching New_Page found for Old_Page ID: " . $old_page->Mapped_To);
+                
+                // Mark this link as broken too
+                $wpdb->update(
+                    'Links',
+                    [
+                        'Status' => 'broken',
+                        'New_URL' => '#broken-link'  // Special marker for broken links
+                    ],
+                    ['ID' => $link->ID]
+                );
+                
+                continue;
+            }
+            
+            $relative_path = get_permalink($new_page->WP_Page_ID);
+            if ($relative_path) {
+                // Strip domain from permalink to make it relative
+                $parsed = wp_parse_url($relative_path);
+                $path = isset($parsed['path']) ? $parsed['path'] : '/';
+
+                // Update the Links table with this relative path
+                $wpdb->update(
+                    'Links',
+                    [
+                        'New_URL' => $path,
+                        'Status' => 'resolved'
+                    ],
+                    ['ID' => $link->ID]
+                );
+
+                error_log("Mapped internal link: {$old_url} → {$path}");
             }
         }
     
@@ -161,8 +213,8 @@ class Migration_Links {
     public static function fix_all_links() {
         global $wpdb;
     
-        // Get all resolved links
-        $links = $wpdb->get_results("SELECT ID, old_url, new_url FROM Links WHERE new_url IS NOT NULL");
+        // Get all links with a New_URL (including broken ones)
+        $links = $wpdb->get_results("SELECT ID, Old_URL, New_URL, Status FROM Links WHERE New_URL IS NOT NULL");
     
         foreach ($links as $link) {
             $occurrences = $wpdb->get_results($wpdb->prepare(
@@ -180,8 +232,29 @@ class Migration_Links {
                 $post = get_post($wp_page_id);
                 if (!$post) continue;
     
-                // Replace old_url with new_url
-                $updated_content = str_replace($link->old_url, $link->new_url, $post->post_content);
+                if ($link->Status === 'broken') {
+                    // For broken links, replace with a visually distinct marker
+                    $broken_link_html = '<a href="#broken-link" class="broken-link" title="Original URL: ' . esc_attr($link->Old_URL) . '" style="color: red; text-decoration: line-through;">';
+                    
+                    // Find the original link and replace it with our marked-up version
+                    $pattern = '/<a[^>]*href=["\']' . preg_quote($link->Old_URL, '/') . '["\'][^>]*>(.*?)<\/a>/i';
+                    $replacement = $broken_link_html . '$1</a> <span class="broken-link-note" style="color: red; font-size: 0.8em;">[Broken Link]</span>';
+                    
+                    $updated_content = preg_replace($pattern, $replacement, $post->post_content);
+                } else {
+                    // For working links, just update the URL
+                    $updated_content = str_replace($link->Old_URL, $link->New_URL, $post->post_content);
+                    
+                    // Update the Status to 'resolved' if it's not already
+                    if ($link->Status !== 'resolved') {
+                        $wpdb->update(
+                            'Links',
+                            ['Status' => 'resolved'],
+                            ['ID' => $link->ID]
+                        );
+                        error_log("Updated link status to 'resolved' for ID {$link->ID}");
+                    }
+                }
     
                 if ($updated_content !== $post->post_content) {
                     wp_update_post([
@@ -189,10 +262,19 @@ class Migration_Links {
                         'post_content' => $updated_content
                     ]);
     
-                    error_log("Fixed link on page ID {$wp_page_id}: {$link->old_url} → {$link->new_url}");
+                    $status_text = ($link->Status === 'broken') ? " (marked as broken)" : "";
+                    error_log("Fixed link on page ID {$wp_page_id}: {$link->Old_URL} → {$link->New_URL}{$status_text}");
                 }
             }
         }
+    
+        // Add some CSS to highlight broken links in the admin area
+        add_action('admin_head', function() {
+            echo '<style>
+                .broken-link { color: red !important; text-decoration: line-through !important; }
+                .broken-link-note { color: red; font-size: 0.8em; font-weight: bold; }
+            </style>';
+        });
     
         error_log("Link fixing completed.");
     }
