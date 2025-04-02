@@ -640,7 +640,7 @@ class Migration_Pages {
 
         
         $new_page_db_id = null;
-        
+        error_log('Processing parent page and the template is: ' . $template);
         // Check if we need to create a new page
         if ($page_id === 'new_page') {
             // Use the title from the content.json file, or from the input if provided

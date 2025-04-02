@@ -22,15 +22,17 @@ class Migration_Templates {
                 
                 // Process each template file
                 foreach ($template_files as $template_file) {
-                    // Remove "template-" prefix and ".php" extension to get the template name
-                    $template_name = str_replace('template-', '', basename($template_file, '.php'));
-                    // Use theme name as prefix for the template key to avoid conflicts
-                    $template_key = $theme_name . '-' . $template_name;
-                    // Create a readable display name
-                    $display_name = ucwords(str_replace(['-', '_'], ' ', $theme_name)) . ' - ' . 
-                                   ucwords(str_replace(['-', '_'], ' ', $template_name));
+                    $template_filename = basename($template_file); // e.g., 'template-department-homepage.php'
+                    $template_key = $template_filename; // This will be used to assign the template to the page
                     
-                    $templates[$template_key] = $display_name;
+                    // Create a display name: remove 'template-' and '.php', then prettify
+                    $raw_name = basename($template_file, '.php'); // e.g., 'template-department-homepage'
+                    $display_base = str_replace('template-', '', $raw_name); // 'department-homepage'
+                    $display_name = ucwords(str_replace(['-', '_'], ' ', $display_base)); // 'Department Homepage'
+                    
+                    
+                    $templates[$template_key] = $theme_name . ' - ' . $display_name;
+
                 }
             }
         }
@@ -40,11 +42,10 @@ class Migration_Templates {
 
     public static function display_template_selection($relative_path) {
         echo '<label>Select Template:</label>';
-        echo '<select id="template">';
+        echo '<select id="page_template">';
         foreach (self::get_available_templates() as $key => $name) {
             echo '<option value="' . esc_attr($key) . '">' . esc_html($name) . '</option>';
         }
         echo '</select>';
-        echo '<button id="apply-template" data-path="' . esc_attr($relative_path) . '">Apply</button>';
     }
 }
