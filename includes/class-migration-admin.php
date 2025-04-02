@@ -84,70 +84,6 @@ class Migration_Admin {
         echo '<div class="wrap">';
         echo '<h1>Migration Assistant</h1>';
         
-        // Add inline styles
-        echo '<style>
-            #ma-container { 
-                display: flex; 
-                margin-bottom: 20px;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-                overflow: hidden;
-                height: 600px; /* Fixed height container */
-            }
-            #ma-menu { 
-                width: 30%; 
-                padding: 15px;
-                border-right: 1px solid #ddd;
-                overflow: auto; /* Scrollable */
-                height: 100%;
-                background: #f9f9f9;
-            }
-            #ma-content { 
-                width: 70%; 
-                padding: 15px;
-                overflow: auto; /* Scrollable */
-                height: 100%;
-            }
-            
-            /* File tree styling */
-            .folder > ul { margin-left: 20px; }
-            .folder > a.directory { 
-                font-weight: bold; 
-                color: #0073aa; 
-                text-decoration: none;
-                cursor: pointer;
-                display: block;
-                padding: 5px 0;
-            }
-            .file > a {
-                color: #444;
-                text-decoration: none;
-                display: block;
-                padding: 3px 0;
-            }
-            .toggle-icon {
-                display: inline-block;
-                width: 16px;
-                height: 16px;
-                text-align: center;
-                margin-right: 5px;
-                font-size: 10px;
-            }
-            .folder > a.directory:hover,
-            .file > a:hover {
-                text-decoration: underline;
-            }
-            
-            /* Tools section styling */
-            .tools-section {
-                margin-top: 20px;
-                padding: 15px;
-                background: #fff;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-            }
-        </style>';
-        
         echo '<div id="ma-container">';
         
         echo '<div id="ma-menu">';
@@ -157,16 +93,27 @@ class Migration_Admin {
         
         echo '<div id="ma-content">';
         if (isset($_GET['file'])) {
-            echo '<p>File: ' . urldecode($_GET['file']) . '</p>';
-            Migration_Pages::display_file(urldecode($_GET['file']));
+            // Only display the file content in the main content area
+            $file_path = urldecode($_GET['file']);
+            Migration_Pages::display_file($file_path);
+            echo '<p class="file-path">File: ' . $file_path . '</p>';
         } else {
-            echo '<p>Select a folder to view its content.</p>';
+            echo '<p>Select a file from the tree to view its content.</p>';
         }
         echo '</div>'; // closes ma-content
         echo '</div>'; // closes ma-container
         
-        // Tools section
-        echo '<div class="tools-section">';
+        // File actions section (only shown when a file is selected)
+        if (isset($_GET['file'])) {
+            echo '<div class="tools-section file-tools-section">';
+            echo '<h2>File Actions</h2>';
+            // Display the file actions in a separate section
+            Migration_Pages::display_file_actions(urldecode($_GET['file']));
+            echo '</div>';
+        }
+        
+        // Global tools section
+        echo '<div class="tools-section global-tools-section">';
         echo '<h2>Link Management Tools</h2>';
         echo '<form method="post">';
         wp_nonce_field('run_migration_tools');

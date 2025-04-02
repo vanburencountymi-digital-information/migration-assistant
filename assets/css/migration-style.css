@@ -36,3 +36,164 @@
 .file > a:hover {
     text-decoration: underline;
 }
+
+/* Main container layout */
+#ma-container { 
+    display: flex; 
+    margin-bottom: 20px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    overflow: hidden;
+    height: 600px; /* Fixed height container */
+}
+
+#ma-menu { 
+    width: 30%; 
+    padding: 15px;
+    border-right: 1px solid #ddd;
+    overflow: auto; /* Scrollable */
+    height: 100%;
+    background: #f9f9f9;
+}
+
+#ma-content { 
+    width: 70%; 
+    padding: 15px;
+    overflow: auto; /* Scrollable */
+    height: 100%;
+}
+
+/* Enhanced file tree styling */
+.folder > ul { 
+    margin-left: 20px; 
+}
+
+.folder > a.directory { 
+    font-weight: bold; 
+    color: #0073aa; 
+    text-decoration: none;
+    cursor: pointer;
+    display: block;
+    padding: 5px 0;
+}
+
+.file > a {
+    color: #444;
+    text-decoration: none;
+    display: block;
+    padding: 3px 0;
+}
+
+/* File content styling */
+.file-preview {
+    margin-bottom: 20px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #eee;
+}
+
+.file-path {
+    color: #666;
+    font-style: italic;
+    margin-top: 5px;
+}
+
+/* File actions styling */
+.file-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.file-actions-left {
+    width: 25%;
+    flex-shrink: 0;
+}
+
+.file-actions-right {
+    width: 75%;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* Update to use flexbox for horizontal layout */
+.action-section {
+    background: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 15px;
+}
+
+/* Add a container for the horizontal sections */
+.horizontal-sections {
+    display: flex;
+    gap: 20px;
+    width: 100%;
+}
+
+
+
+/* Make results-section take remaining width */
+.results-section {
+    flex: 1; /* Grow to fill remaining space */
+}
+
+.action-section h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #eee;
+}
+
+/* Subpage list styling */
+.subpage-list {
+    margin-top: 10px;
+}
+
+.subpage-list-items {
+    margin-top: 5px;
+    max-height: 300px;
+    overflow-y: auto;
+    padding-right: 10px;
+}
+
+/* Make the subpage section fill the height */
+.subpage-options {
+    height: 250px;
+    overflow-y: scroll;
+}
+
+/* Results section */
+.results-section {
+    width: auto;
+}
+
+/* Merge action styling */
+#merge-content {
+    padding: 10px 20px;
+    height: auto;
+    width: auto;
+    margin-top: 20px;
+}
+
+/* Form controls */
+.action-section label {
+    display: block;
+    margin-bottom: 5px;
+}
+
+.action-section select,
+.action-section input[type="text"] {
+    width: 100%;
+    max-width: 100%;
+}
+
+/* Tools section styling */
+.tools-section {
+    margin-top: 20px;
+    padding: 15px;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}

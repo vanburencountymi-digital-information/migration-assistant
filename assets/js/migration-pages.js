@@ -180,6 +180,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         const container = document.getElementById("subpage-tree-list");
                         if (container) {
                             container.innerHTML = ''; // Clear existing content
+                            container.style.display = 'block';
                             renderTree(response.data.tree, container);
                         }
                     }

@@ -26,56 +26,98 @@ class Migration_Pages {
         $title = isset($data['title']) ? esc_html($data['title']) : 'Untitled';
         $content = isset($data['cleaned_content']) ? Migration_Links::update_links($data['cleaned_content']) : '';
     
+        // Display just the file content
+        echo '<div class="file-preview">';
         echo '<h2>' . $title . '</h2>';
-        echo '<div>' . $content . '</div>';
-        
-        // Dropdown to select an existing WordPress page
-        echo '<label for="existing_page">Select Destination Page:</label>';
-        self::get_existing_pages_dropdown();
+        echo '<div class="file-content">' . $content . '</div>';
+        echo '</div>';
+    }
     
-        // Template selection for the page
-        Migration_Templates::display_template_selection($relative_path);
-    
-        // Find subpages and get their titles
+    /**
+     * Display action tools for a file
+     * 
+     * @param string $relative_path Path to the file relative to MIGRATION_CLEANED_DATA
+     */
+    public static function display_file_actions($relative_path) {
+        // Find subpages
         $subpages = self::find_subpages($relative_path);
         $subpage_count = count($subpages);
         
-        // Subpage checkbox option
-        echo '<div class="subpage-options">';
+        echo '<div class="file-actions">';
+        
+        // Build the subpage tree first
+        $subpage_tree = self::build_subpage_tree($relative_path);
+        // Count total nodes in the tree
+        $subpage_count = self::count_subpage_tree_nodes($subpage_tree);
+
+        echo '<div class="action-section subpage-options">';
+        echo '<h3>Subpages</h3>';
         echo '<input type="checkbox" id="build-subpages-checkbox" name="build_subpages" checked>';
         echo '<label for="build-subpages-checkbox">Build subpages too</label>';
         echo '<span class="subpage-count">(' . $subpage_count . ' subpages found)</span>';
-        
-        // Display subpage titles if any exist
+
+        // Display subpage tree if any exist
         if ($subpage_count > 0) {
             echo '<div class="subpage-list" style="margin-top: 10px; margin-left: 20px;">';
             echo '<strong>Subpages to be created:</strong>';
-            echo '<ul style="margin-top: 5px;">';
+            echo '<ul id="subpage-preview-tree" style="margin-top: 5px;">';
             
-            foreach ($subpages as $subpage_path) {
-                $subpage_file = MIGRATION_CLEANED_DATA . $subpage_path;
-                if (file_exists($subpage_file)) {
-                    $subpage_data = json_decode(file_get_contents($subpage_file), true);
-                    $subpage_title = isset($subpage_data['title']) ? esc_html($subpage_data['title']) : 'Untitled Subpage';
-                    echo '<li>' . $subpage_title . '</li>';
-                } else {
-                    echo '<li><em>Unknown subpage</em>: ' . esc_html($subpage_path) . '</li>';
-                }
-            }
+            // Add the hidden data element for the tree
+            echo '<div id="subpage-tree-preview-data" style="display:none;" data-tree=\'' . json_encode($subpage_tree) . '\'></div>';
             
             echo '</ul>';
             echo '</div>';
         }
-        
         echo '</div>';
-    
-        // Merge Content Button
-        echo '<button id="merge-content" data-file="' . esc_attr($relative_path) . '">Merge Content</button>';
+        // Close options container
+
+        // Open tool-stack
+        //--------------------------------
+        echo '<div class="tool-stack">';
+
+        // Destination selection container
+        echo '<div class="action-section destination-selection">';
+        echo '<h3>Destination</h3>';
+        // Dropdown to select an existing WordPress page
+        echo '<label for="existing_page">Select Destination Page:</label>';
+        self::get_existing_pages_dropdown();
         
-        echo '<div id="subpage-tree-container" style="margin-top: 20px;">';
+        // New page title container (hidden by default, shown via JS)
+        echo '<div id="new-page-title-container" style="display:none; margin-top: 10px;">';
+        echo '<label for="new_page_title">New Page Title:</label>';
+        echo '<input type="text" id="new_page_title" name="new_page_title" placeholder="Enter page title">';
+        echo '</div>';
+        echo '</div>';
+        // Close destination selection container
+
+        // Template selection container
+        echo '<div class="action-section template-selection">';
+        echo '<h3>Template</h3>';
+        // Template selection for the page
+        Migration_Templates::display_template_selection($relative_path);
+        echo '</div>';
+        // Close template selection container
+
+        // Merge Content Button 
+        echo '<button id="merge-content" class="button button-primary" data-file="' . esc_attr($relative_path) . '">Merge Content</button>';
+        // Close merge content button
+
+        echo '</div>';
+        //--------------------------------
+        // Close tool-stack
+
+
+
+        
+        // Subpage tree container
+        echo '<div id="subpage-tree-container" class="action-section results-section" style="display:block;">';
         echo '<h3>Subpages Created</h3>';
         echo '<ul id="subpage-tree-list"></ul>';
         echo '</div>';
+        // Close subpage tree container
+
+
+        echo '</div>'; // Close file-actions
 
         // Add JavaScript for handling the new page option
         ?>
@@ -89,6 +131,33 @@ class Migration_Pages {
                     $('#new-page-title-container').hide();
                 }
             });
+            
+            // Render the subpage tree preview
+            if ($('#subpage-tree-preview-data').length) {
+                try {
+                    const treeData = JSON.parse($('#subpage-tree-preview-data').attr('data-tree'));
+                    const container = document.getElementById('subpage-preview-tree');
+                    
+                    function renderTree(tree, container, depth = 0) {
+                        tree.forEach(node => {
+                            const li = document.createElement("li");
+                            li.textContent = `${"—".repeat(depth)} ${node.title}`;
+                            container.appendChild(li);
+                    
+                            if (node.children && node.children.length > 0) {
+                                const ul = document.createElement("ul");
+                                ul.style.marginLeft = "20px";
+                                container.appendChild(ul);
+                                renderTree(node.children, ul, depth + 1);
+                            }
+                        });
+                    }
+                    
+                    renderTree(treeData, container);
+                } catch (e) {
+                    console.error("Error rendering subpage tree:", e);
+                }
+            }
         });
         </script>
         <?php
@@ -863,12 +932,13 @@ class Migration_Pages {
         $subpages = json_decode(file_get_contents($_POST['subpages']), true);
     
         foreach ($subpages as $subpage) {
-            $data = json_decode(file_get_contents(MIGRATION_CLEANED_DATA . '/' . $subpage), true);
+            $file_path = MIGRATION_CLEANED_DATA . '/' . $subpage;
+            $data = json_decode(file_get_contents($file_path), true);
             $cleaned_content = isset($data['cleaned_content']) ? $data['cleaned_content'] : '';
     
             $new_page_id = wp_insert_post([
                 'post_title' => $data['title'],
-                'post_content' => self::convert_html_to_blocks($cleaned_content),
+                'post_content' => self::convert_html_to_blocks($cleaned_content, $file_path),
                 'post_status' => 'publish',
                 'post_parent' => $parent_id,
                 'post_type' => 'page'
@@ -916,6 +986,64 @@ class Migration_Pages {
         }
         
         return $subpages;
+    }
+
+    /**
+     * Recursively build a tree of subpages
+     * 
+     * @param string $relative_path Path to the parent page content.json
+     * @param int $depth Current depth level (to prevent infinite recursion)
+     * @return array Tree structure of subpages
+     */
+    public static function build_subpage_tree($relative_path, $depth = 0) {
+        // Prevent infinite recursion
+        if ($depth > MIGRATION_MAX_DEPTH || $depth > 10) {
+            return [];
+        }
+        
+        $tree = [];
+        $subpages = self::find_subpages($relative_path);
+        
+        foreach ($subpages as $subpage_path) {
+            $subpage_file = MIGRATION_CLEANED_DATA . $subpage_path;
+            if (file_exists($subpage_file)) {
+                $subpage_data = json_decode(file_get_contents($subpage_file), true);
+                $subpage_title = isset($subpage_data['title']) ? esc_html($subpage_data['title']) : 'Untitled Subpage';
+                
+                // Recursively get children
+                $children = self::build_subpage_tree($subpage_path, $depth + 1);
+                
+                $tree[] = [
+                    'title' => $subpage_title,
+                    'path' => $subpage_path,
+                    'children' => $children
+                ];
+            }
+        }
+        
+        return $tree;
+    }
+
+    /**
+     * Count the total number of nodes in the subpage tree
+     * 
+     * @param array $tree The subpage tree structure
+     * @return int Total number of nodes in the tree
+     */
+    public static function count_subpage_tree_nodes($tree) {
+        $count = 0;
+        
+        foreach ($tree as $node) {
+            // Count this node
+            $count++;
+            
+            // Count all children recursively
+            if (!empty($node['children'])) {
+                $count += self::count_subpage_tree_nodes($node['children']);
+            }
+        }
+        
+        return $count;
     }
 }
 add_action('wp_ajax_merge_content', array('Migration_Pages', 'merge_content_into_page'));
