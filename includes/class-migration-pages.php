@@ -496,7 +496,14 @@ class Migration_Pages {
         $page_id = isset($_POST['page_id']) ? $_POST['page_id'] : '';
         $file_path = isset($_POST['file']) ? MIGRATION_CLEANED_DATA . $_POST['file'] : '';
         $build_subpages = isset($_POST['build_subpages']) && $_POST['build_subpages'] === 'true';
-        $template = isset($_POST['template']) ? sanitize_text_field($_POST['template']) : '';
+        $templates = [];
+        if (isset($_POST['templates'])) {
+            error_log("Templates: " . $_POST['templates']);
+            // Don't use sanitize_text_field() on JSON strings as it can break the JSON structure
+            $templates = json_decode(stripslashes($_POST['templates']), true);
+            error_log("Templates decoded: " . print_r($templates, true));
+        }
+
         $process_type = $_POST['process_type']; // We know this exists now
         
         error_log("Merge content request received");
@@ -504,7 +511,7 @@ class Migration_Pages {
         error_log("Page ID/option: " . $page_id);
         error_log("File path: " . $file_path);
         error_log("Build subpages flag: " . ($build_subpages ? 'true' : 'false'));
-        error_log("Template: " . $template);
+        error_log("Templates: " . print_r($templates, true));
         
         if (!file_exists($file_path)) {
             error_log("File not found: " . $file_path);
@@ -535,7 +542,8 @@ class Migration_Pages {
             $_SESSION[$lock_key] = true;
             
             try {
-                $result = self::process_parent_page($page_id, $file_path, $data, $template);
+                $parent_template = isset($templates[0]) ? $templates[0] : '';
+                $result = self::process_parent_page($page_id, $file_path, $data, $parent_template);
                 
                 // Release the lock
                 $_SESSION[$lock_key] = false;
@@ -587,7 +595,7 @@ class Migration_Pages {
             $_SESSION[$lock_key] = true;
             
             try {
-                $tree = self::process_subpages($parent_page_id, $_POST['file'], $template);
+                $tree = self::process_subpages($parent_page_id, $_POST['file'], $templates);
 
                 // Release the lock
                 $_SESSION[$lock_key] = false;
@@ -749,7 +757,7 @@ class Migration_Pages {
         ];
     }
     //Process subpages recursively
-    private static function process_subpages($parent_page_id, $parent_file_path, $template, $depth = 0) {
+    private static function process_subpages($parent_page_id, $parent_file_path, $templates, $depth = 0) {
         global $wpdb;
     
         if ($depth > MIGRATION_MAX_DEPTH) {
@@ -790,9 +798,11 @@ class Migration_Pages {
                 error_log("Error creating subpage: " . $new_subpage_id->get_error_message());
                 continue;
             }
-    
-            if (!empty($template)) {
-                update_post_meta($new_subpage_id, '_wp_page_template', $template);
+            
+            $current_template = isset($templates[$depth + 1]) ? $templates[$depth + 1] : '';
+            error_log("Current template: " . $current_template);
+            if (!empty($current_template)) {
+                update_post_meta($new_subpage_id, '_wp_page_template', $current_template);
             }
     
             $wpdb->insert('New_Pages', [
@@ -819,7 +829,7 @@ class Migration_Pages {
             }
     
             // 🔁 RECURSE
-            $children = self::process_subpages($new_subpage_id, $subpage_path, $template, $depth + 1);
+            $children = self::process_subpages($new_subpage_id, $subpage_path, $templates, $depth + 1);
     
             // Build tree node
             $tree[] = [

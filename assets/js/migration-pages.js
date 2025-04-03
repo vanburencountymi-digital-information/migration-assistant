@@ -24,8 +24,15 @@ document.addEventListener('DOMContentLoaded', function() {
             
             let pageId = document.getElementById("existing_page").value;
             let filePath = mergeButton.dataset.file;
-            let template = document.getElementById("page_template") ? 
-                           document.getElementById("page_template").value : '';
+
+            // Gather all template dropdown selections into an object
+            let templateSelections = {};
+            document.querySelectorAll('.page_template_dropdown').forEach(function(el) {
+                let level = el.getAttribute('data-level');
+                templateSelections[level] = el.value;
+            });
+            // Convert the object to a JSON string for transmission
+            let templatesJSON = JSON.stringify(templateSelections);
             
             // Explicitly check for the checkbox element and its state
             const buildSubpagesCheckbox = document.getElementById("build-subpages-checkbox");
@@ -52,12 +59,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             
-            console.log('Processing content with settings:');
-            console.log('File:', filePath);
-            console.log('Page ID/Option:', pageId);
-            console.log('New Page Title:', newPageTitle);
-            console.log('Template:', template);
-            console.log('Build Subpages:', buildSubpages);
+            // Log the settings for debugging
+            console.log('Processing content with settings:', {
+                file: filePath,
+                pageId: pageId,
+                newPageTitle: newPageTitle,
+                templates: templateSelections,
+                buildSubpages: buildSubpages
+            });
             
             if (!filePath) {
                 alert("No file selected to process.");
@@ -70,18 +79,18 @@ document.addEventListener('DOMContentLoaded', function() {
             mergeButton.textContent = "Processing parent page...";
             
             // Step 1: Process the parent page first
-            processParentPage(pageId, filePath, template, newPageTitle, buildSubpages);
+            processParentPage(pageId, filePath, templatesJSON, newPageTitle, buildSubpages);
         });
         
         // Function to process the parent page
-        function processParentPage(pageId, filePath, template, newPageTitle, buildSubpages) {
+        function processParentPage(pageId, filePath, templatesJSON, newPageTitle, buildSubpages) {
             // Create the data object for parent page processing
             const postData = {
                 action: "merge_content",
                 process_type: "parent",
                 page_id: pageId,
                 file: filePath,
-                template: template,
+                templates: templatesJSON,
                 build_subpages: buildSubpages,
                 new_page_title: newPageTitle
             };
@@ -103,7 +112,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             // Add a small delay to ensure the parent page is fully saved
                             setTimeout(function() {
                                 // Step 2: Process subpages after parent page is created
-                                processSubpages(response.data.parent_page_id, filePath, template);
+                                processSubpages(response.data.parent_page_id, filePath, templatesJSON);
                             }, 500); // 500ms delay
                         } else {
                             // No subpages to process, we're done
@@ -149,14 +158,14 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         
         // Function to process subpages
-        function processSubpages(parentPageId, filePath, template) {
+        function processSubpages(parentPageId, filePath, templatesJSON) {
             // Create the data object for subpage processing
             const postData = {
                 action: "merge_content",
                 process_type: "subpages",
                 parent_page_id: parentPageId,
                 file: filePath,
-                template: template
+                templates: templatesJSON
             };
             
             console.log("Sending subpages AJAX data:", postData);
