@@ -645,7 +645,8 @@ class Migration_Pages {
 
         
         $blocks = self::convert_html_to_blocks($cleaned_content, $file_path);
-
+        $cleaned_blocks = preg_replace('/>\s+</', '><', $blocks); // Removes inter-tag whitespace
+        error_log("Here's what the blocks look like: " . $cleaned_blocks);
         
         $new_page_db_id = null;
         error_log('Processing parent page and the template is: ' . $template);
@@ -660,7 +661,7 @@ class Migration_Pages {
             // Create a new page
             $page_id = wp_insert_post([
                 'post_title' => $new_page_title,
-                'post_content' => $blocks,
+                'post_content' => $cleaned_blocks,
                 'post_status' => 'publish',
                 'post_type' => 'page'
             ]);
@@ -698,7 +699,7 @@ class Migration_Pages {
             
             // Append blocks to existing content
             $existing_content = get_post_field('post_content', $page_id);
-            $new_content = $existing_content . "\n\n" . $blocks;
+            $new_content = $existing_content . "\n\n" . $cleaned_blocks;
         
             wp_update_post([
                 'ID' => $page_id,
