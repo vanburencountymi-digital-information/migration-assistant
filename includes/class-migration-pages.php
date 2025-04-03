@@ -646,7 +646,6 @@ class Migration_Pages {
         
         $blocks = self::convert_html_to_blocks($cleaned_content, $file_path);
         $cleaned_blocks = preg_replace('/>\s+</', '><', $blocks); // Removes inter-tag whitespace
-        error_log("Here's what the blocks look like: " . $cleaned_blocks);
         
         $new_page_db_id = null;
         error_log('Processing parent page and the template is: ' . $template);
@@ -785,11 +784,12 @@ class Migration_Pages {
     
             error_log(str_repeat('  ', $depth) . "Creating: $subpage_title");
     
-            $converted_blocks = self::convert_html_to_blocks($subpage_content, $subpage_file);
+            $blocks = self::convert_html_to_blocks($subpage_content, $subpage_file);
+            $cleaned_blocks = preg_replace('/>\s+</', '><', $blocks); // Removes inter-tag whitespace
     
             $new_subpage_id = wp_insert_post([
                 'post_title'   => $subpage_title,
-                'post_content' => $converted_blocks,
+                'post_content' => $cleaned_blocks,
                 'post_status'  => 'publish',
                 'post_parent'  => $parent_page_id,
                 'post_type'    => 'page'
