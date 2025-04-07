@@ -4,10 +4,12 @@ class Migration_Pages {
     private static $airtable_departments_cache = null;
 
     private static function fetch_airtable_departments() {
+        error_log("Fetching Airtable departments");
         if (self::$airtable_departments_cache !== null) {
+            error_log("Returning cached Airtable departments");
             return self::$airtable_departments_cache;
         }
-
+        error_log("Fetching Airtable departments from API");
         $url = 'https://api.airtable.com/v0/' . AIRTABLE_BASE_ID . '/Departments'; // or your table name
 
         $response = wp_remote_get($url, [
@@ -15,7 +17,7 @@ class Migration_Pages {
                 'Authorization' => 'Bearer ' . AIRTABLE_API_KEY
             ]
         ]);
-
+        error_log("Airtable departments response: " . print_r($response, true));
         if (is_wp_error($response)) {
             error_log('Error fetching Airtable departments: ' . $response->get_error_message());
             return [];
@@ -1158,3 +1160,12 @@ class Migration_Pages {
 add_action('wp_ajax_merge_content', array('Migration_Pages', 'merge_content_into_page'));
 add_action('wp_ajax_build_subpages', array('Migration_Pages', 'build_subpages'));
 add_action('wp_ajax_get_airtable_departments', array('Migration_Pages', 'get_airtable_departments'));
+add_action('wp_ajax_populate_old_pages', function () {
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+
+    Migration_Bulk::populate_old_pages_from_cleaned_data();
+    wp_send_json_success(['message' => 'Old pages populated']);
+});
+

@@ -269,5 +269,30 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-    
+    // Populate old pages table
+    const oldPagesButton = document.getElementById("populate-old-pages-button");
+    const oldPagesLog = document.getElementById("old-pages-log");
+
+    if (oldPagesButton && oldPagesLog) {
+        oldPagesButton.addEventListener("click", function () {
+            oldPagesLog.textContent = "Populating old pages...";
+            oldPagesLog.style.display = "block";
+
+            jQuery.post(migrationAdminData.ajax_url, {
+                action: "populate_old_pages"
+            }, function (response) {
+                if (response.success) {
+                    oldPagesLog.textContent = "✅ " + response.data.message;
+                    console.log("Old pages populated successfully.");
+                } else {
+                    oldPagesLog.textContent = "❌ " + (response.data?.message || "Unknown error");
+                    console.error("Old pages population error:", response);
+                }
+            }).fail(function (xhr, status, error) {
+                oldPagesLog.textContent = `AJAX request failed: ${status}`;
+                console.error("AJAX error:", error);
+            });
+        });
+    }
+
 });

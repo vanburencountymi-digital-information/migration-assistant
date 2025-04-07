@@ -129,7 +129,13 @@ class Migration_Admin {
         echo '<input type="text" id="test-department-name" placeholder="e.g. Public Defender\'s" style="width: 300px;" />';
         echo '</p>';
         echo '<pre id="airtable-log" style="background: #f1f1f1; padding: 10px; display: none;"></pre>';
-
+        echo '<hr>';
+        echo '<h2>Data Utilities</h2>';
+        echo '<p>';
+        echo '<button id="populate-old-pages-button" class="button">Populate Old Pages Table</button>';
+        echo '</p>';
+        echo '<pre id="old-pages-log" style="background: #f1f1f1; padding: 10px; display: none;"></pre>';
+        
         echo '</div>'; // closes tools-section
 
         echo '</div>'; // closes .wrap
