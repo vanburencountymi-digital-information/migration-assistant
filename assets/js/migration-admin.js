@@ -183,4 +183,61 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     }
+
+    // Test Airtable connection and department search
+    const airtableButton = document.getElementById("test-airtable-button");
+    const airtableLog = document.getElementById("airtable-log");
+    const testInput = document.getElementById("test-department-name");
+    
+    if (airtableButton && airtableLog && testInput) {
+        airtableButton.addEventListener("click", function () {
+            airtableLog.textContent = "Fetching departments...";
+            airtableLog.style.display = "block";
+    
+            const rawInput = testInput.value.trim();
+    
+            // Normalization function (remove punctuation, extra spaces, lowercase)
+            const normalize = str =>
+                str.toLowerCase()
+                    .replace(/[^\w\s]/gi, '') // remove punctuation
+                    .replace(/\s+/g, ' ')     // collapse multiple spaces
+                    .trim();
+    
+            const normalizedInput = normalize(rawInput);
+    
+            jQuery.post(migrationAdminData.ajax_url, {
+                action: "get_airtable_departments"
+            }, function (response) {
+                if (response.success && Array.isArray(response.data.departments)) {
+                    const departments = response.data.departments;
+    
+                    if (normalizedInput.length > 0) {
+                        const matches = departments.filter(dep =>
+                            normalize(dep.name).includes(normalizedInput)
+                        );
+    
+                        if (matches.length > 0) {
+                            const output = matches.map(dep => `${dep.name} (ID: ${dep.id})`).join('\n');
+                            airtableLog.textContent = `✅ Partial matches found:\n` + output;
+                        } else {
+                            airtableLog.textContent = `❌ No match found for "${rawInput}"`;
+                        }
+                    } else {
+                        // No input → show full list
+                        const output = departments.map(dep => `${dep.name} (${dep.id})`).join('\n');
+                        airtableLog.textContent = output;
+                    }
+                } else {
+                    airtableLog.textContent = "Error fetching departments.";
+                    console.error("Fetch error:", response);
+                }
+            }).fail(function (xhr, status, error) {
+                airtableLog.textContent = `AJAX request failed: ${status}`;
+                console.error("AJAX error:", error);
+            });
+        });
+    }
+    
+    
+
 });

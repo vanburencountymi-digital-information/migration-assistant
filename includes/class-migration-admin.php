@@ -121,6 +121,15 @@ class Migration_Admin {
         echo '<p><button type="submit" name="generate_internal_links" class="button button-primary">Generate Internal Link Mappings</button></p>';
         echo '<p><button type="submit" name="fix_all_links" class="button button-secondary">Fix All Links in Page Content</button></p>';
         echo '</form>';
+        echo '<hr>';
+        echo '<h2>Test Airtable Connection</h2>';
+        echo '<p><button id="test-airtable-button" class="button">Test Airtable Department Fetch</button></p>';
+        echo '<p>';
+        echo '<label for="test-department-name">Department name to test: </label>';
+        echo '<input type="text" id="test-department-name" placeholder="e.g. Public Defender\'s" style="width: 300px;" />';
+        echo '</p>';
+        echo '<pre id="airtable-log" style="background: #f1f1f1; padding: 10px; display: none;"></pre>';
+
         echo '</div>'; // closes tools-section
 
         echo '</div>'; // closes .wrap

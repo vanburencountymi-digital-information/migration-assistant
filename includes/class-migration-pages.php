@@ -1,6 +1,76 @@
 <?php
 
 class Migration_Pages {
+    private static $airtable_departments_cache = null;
+
+    private static function fetch_airtable_departments() {
+        if (self::$airtable_departments_cache !== null) {
+            return self::$airtable_departments_cache;
+        }
+
+        $url = 'https://api.airtable.com/v0/' . AIRTABLE_BASE_ID . '/Departments'; // or your table name
+
+        $response = wp_remote_get($url, [
+            'headers' => [
+                'Authorization' => 'Bearer ' . AIRTABLE_API_KEY
+            ]
+        ]);
+
+        if (is_wp_error($response)) {
+            error_log('Error fetching Airtable departments: ' . $response->get_error_message());
+            return [];
+        }
+
+        $data = json_decode(wp_remote_retrieve_body($response), true);
+        self::$airtable_departments_cache = [];
+
+        foreach ($data['records'] as $record) {
+            $fields = $record['fields'];
+            if (isset($fields['Department Name']) && isset($fields['Department ID'])) {
+                self::$airtable_departments_cache[] = [
+                    'id' => $fields['Department ID'],
+                    'name' => $fields['Department Name']
+                ];
+            }
+        }
+
+        return self::$airtable_departments_cache;
+    }
+    public static function get_airtable_departments() {
+        $departments = self::fetch_airtable_departments();
+        return $departments;
+    }
+
+    private static function maybe_set_department_meta($post_id, $template, $title) {
+        if ($template !== 'template-department-homepage.php') {
+            error_log("❌ Template is not department homepage: '$template'");
+            return;
+        }
+    
+        // Fetch and cache Airtable departments
+        $departments = self::get_airtable_departments(); // Make sure this method exists and is static
+    
+        $normalize = function($string) {
+            return strtolower(preg_replace('/[^\w\s]/', '', $string)); // remove punctuation and lowercase
+        };
+    
+        $normalized_title = $normalize($title);
+    
+        foreach ($departments as $dept) {
+            $normalized_dept_name = $normalize($dept['name']);
+    
+            if (strpos($normalized_dept_name, $normalized_title) !== false || strpos($normalized_title, $normalized_dept_name) !== false) {
+                update_post_meta($post_id, 'department_id', $dept['id']);
+                update_post_meta($post_id, 'department_name', $dept['name']);
+                error_log("✅ Set department meta for '{$dept['name']}' (ID: {$dept['id']}) on post ID $post_id");
+                return;
+            }
+        }
+    
+        error_log("❌ No department match found for title: '$title'");
+    }
+    
+
     public static function get_parent_page_dropdown() {
         $pages = get_pages(['post_status' => 'publish']);
     
@@ -672,10 +742,11 @@ class Migration_Pages {
             
             error_log("New page created with ID: " . $page_id);
             
-            // Apply template if specified
+            // Apply template if specified and set department meta if template is department homepage
             if (!empty($template)) {
                 update_post_meta($page_id, '_wp_page_template', $template);
                 error_log("Applied template to new page: " . $template);
+                self::maybe_set_department_meta($page_id, $template, $new_page_title);
             }
             
             // Insert into New_Pages table
@@ -802,8 +873,10 @@ class Migration_Pages {
             
             $current_template = isset($templates[$depth + 1]) ? $templates[$depth + 1] : '';
             error_log("Current template: " . $current_template);
+            // set template and department meta if template is department homepage
             if (!empty($current_template)) {
                 update_post_meta($new_subpage_id, '_wp_page_template', $current_template);
+                self::maybe_set_department_meta($new_subpage_id, $current_template, $subpage_title);
             }
     
             $wpdb->insert('New_Pages', [
@@ -1084,3 +1157,4 @@ class Migration_Pages {
 }
 add_action('wp_ajax_merge_content', array('Migration_Pages', 'merge_content_into_page'));
 add_action('wp_ajax_build_subpages', array('Migration_Pages', 'build_subpages'));
+add_action('wp_ajax_get_airtable_departments', array('Migration_Pages', 'get_airtable_departments'));
