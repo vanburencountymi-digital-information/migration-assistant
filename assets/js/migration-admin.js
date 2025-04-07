@@ -130,6 +130,7 @@ document.addEventListener('DOMContentLoaded', function() {
         mergeButton.addEventListener("click", function() {
             let pageId = document.getElementById("existing_page").value;
             let filePath = mergeButton.dataset.file; // Ensure this data attribute is set
+            let selectedTopLevelParent = document.getElementById("top-level-parent").value;
 
             if (!pageId || !filePath) {
                 alert("Please select a WordPress page and a file to merge.");
@@ -139,7 +140,8 @@ document.addEventListener('DOMContentLoaded', function() {
             jQuery.post(migrationAdminData.ajax_url, {
                 action: "merge_content",
                 page_id: pageId,
-                file: filePath
+                file: filePath,
+                top_level_parent: selectedTopLevelParent
             }, function(response) {
                 if (response.success) {
                     alert("Content merged successfully!");

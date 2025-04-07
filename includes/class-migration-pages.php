@@ -162,6 +162,20 @@ class Migration_Pages {
         echo '</div>';
         // Close destination selection container
 
+        // Parent page selection container
+        echo '<div class="action-section parent-page-selection">';
+        echo '<h3>Parent Page</h3>';
+        echo '<label for="top-level-parent">Select Top-Level Parent Page:</label>';
+        echo '<select id="top-level-parent">';
+        echo '<option value="0">None (top-level page)</option>';
+        $pages = get_pages(['sort_column' => 'post_title', 'sort_order' => 'asc']);
+        foreach ($pages as $page) {
+            echo '<option value="' . esc_attr($page->ID) . '">' . esc_html($page->post_title) . '</option>';
+        }
+        echo '</select>';
+        echo '</div>';
+        // Close parent page selection container
+
         // Template selection container
         echo '<div class="action-section template-selection">';
         echo '<h3>Template</h3>';
@@ -713,6 +727,9 @@ class Migration_Pages {
         
         $title = isset($data['title']) ? $data['title'] : 'Untitled';
         $cleaned_content = isset($data['cleaned_content']) ? $data['cleaned_content'] : '';
+        $post_parent = isset($_POST['top_level_parent']) ? $_POST['top_level_parent'] : 0;
+        error_log("Received top_level_parent: " . $_POST['top_level_parent']);
+        error_log("Post parent: " . $post_parent);
         
 
         
@@ -734,7 +751,8 @@ class Migration_Pages {
                 'post_title' => $new_page_title,
                 'post_content' => $cleaned_blocks,
                 'post_status' => 'publish',
-                'post_type' => 'page'
+                'post_type' => 'page',
+                'post_parent' => $post_parent
             ]);
             
             if (is_wp_error($page_id)) {
@@ -743,6 +761,7 @@ class Migration_Pages {
             }
             
             error_log("New page created with ID: " . $page_id);
+            error_log("Post parent: " . $post_parent);
             
             // Apply template if specified and set department meta if template is department homepage
             if (!empty($template)) {

@@ -92,7 +92,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 file: filePath,
                 templates: templatesJSON,
                 build_subpages: buildSubpages,
-                new_page_title: newPageTitle
+                new_page_title: newPageTitle,
+                top_level_parent: document.getElementById("top-level-parent").value || 0
             };
             
             console.log("Sending parent page AJAX data:", postData);
