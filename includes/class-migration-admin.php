@@ -104,6 +104,13 @@ class Migration_Admin {
         echo '</div>'; // closes ma-container
         
         // File actions section (only shown when a file is selected)
+        echo '<div id="migration-progress-container" style="display: none; margin-top: 20px;">';
+            echo '<div id="migration-status" style="margin-bottom: 10px;">Preparing to merge content...</div>';
+            echo '<div style="background: #eee; height: 20px; width: 100%; border: 1px solid #ccc;">';
+                echo '<div id="migration-progress-bar" style="background: #0073aa; width: 0%; height: 100%; transition: width 0.3s;"></div>';
+            echo '</div>';
+        echo '</div>';
+
         if (isset($_GET['file'])) {
             echo '<div class="tools-section file-tools-section">';
             echo '<h2>File Actions</h2>';

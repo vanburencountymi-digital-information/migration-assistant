@@ -3,7 +3,28 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Ensure merge button exists before adding event listener
     const mergeButton = document.getElementById("merge-content");
+
+    function showProgressBar(totalPages) {
+        const container = document.getElementById('migration-progress-container');
+        const bar = document.getElementById('migration-progress-bar');
+        const status = document.getElementById('migration-status');
     
+        container.style.display = 'block';
+        bar.style.width = '0%';
+        status.textContent = 'Starting...';
+    
+        window.migrationProgress = {
+            total: totalPages,
+            completed: 0,
+            update: function (message) {
+                this.completed++;
+                const percent = Math.round((this.completed / this.total) * 100);
+                bar.style.width = percent + '%';
+                if (message) status.textContent = message;
+            }
+        };
+    }
+
     if (mergeButton) {
         // Flag to prevent multiple submissions
         let isProcessing = false;
@@ -105,7 +126,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 success: function(response) {
                     if (response.success) {
                         console.log("Parent page processed successfully:", response.data);
-                        
+                        if (response.data.total_pages) {
+                            showProgressBar(response.data.total_pages);
+                        }
                         // Check if we need to process subpages
                         if (response.data.has_subpages) {
                             mergeButton.textContent = "Processing subpages...";

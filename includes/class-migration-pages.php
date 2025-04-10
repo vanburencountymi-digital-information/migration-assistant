@@ -568,8 +568,6 @@ class Migration_Pages {
             }
         }
         
-        // Dump all POST data for debugging
-        error_log("POST data received: " . print_r($_POST, true));
         
         // Check if this is a legacy format request (no process_type)
         if (!isset($_POST['process_type'])) {
@@ -719,11 +717,28 @@ class Migration_Pages {
         }
     }
     
+    private static function count_json_files($dir) {
+        $count = 0;
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS)
+        );
+    
+        foreach ($iterator as $file) {
+            if (strtolower($file->getExtension()) === 'json') {
+                $count++;
+            }
+        }
+    
+        return $count;
+    }
+    
     /**
      * Process the parent page creation or update
      */
     private static function process_parent_page($page_id, $file_path, $data, $template) {
         global $wpdb;
+
+        $total_pages = self::count_json_files($file_path);
         
         $title = isset($data['title']) ? $data['title'] : 'Untitled';
         $cleaned_content = isset($data['cleaned_content']) ? $data['cleaned_content'] : '';
@@ -845,7 +860,8 @@ class Migration_Pages {
         
         return [
             'page_id' => $page_id,
-            'new_page_db_id' => $new_page_db_id
+            'new_page_db_id' => $new_page_db_id,
+            'total_pages' => $total_pages
         ];
     }
     //Process subpages recursively
