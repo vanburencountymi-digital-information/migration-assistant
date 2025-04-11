@@ -104,12 +104,6 @@ class Migration_Admin {
         echo '</div>'; // closes ma-container
         
         // File actions section (only shown when a file is selected)
-        echo '<div id="migration-progress-container" style="display: none; margin-top: 20px;">';
-            echo '<div id="migration-status" style="margin-bottom: 10px;">Preparing to merge content...</div>';
-            echo '<div style="background: #eee; height: 20px; width: 100%; border: 1px solid #ccc;">';
-                echo '<div id="migration-progress-bar" style="background: #0073aa; width: 0%; height: 100%; transition: width 0.3s;"></div>';
-            echo '</div>';
-        echo '</div>';
 
         if (isset($_GET['file'])) {
             echo '<div class="tools-section file-tools-section">';
@@ -144,6 +138,20 @@ class Migration_Admin {
         echo '<pre id="old-pages-log" style="background: #f1f1f1; padding: 10px; display: none;"></pre>';
         
         echo '</div>'; // closes tools-section
+        echo <<<HTML
+            <div id="migration-progress-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:10000; align-items:center; justify-content:center;">
+            <div style="background:#fff; padding:20px 30px; border-radius:10px; box-shadow:0 4px 12px rgba(0,0,0,0.3); max-width:500px; width:90%;">
+                <h2 style="margin-top:0;">Migration Progress</h2>
+                <div id="migration-status" style="margin-bottom:10px;">Preparing...</div>
+                <div style="background:#eee; height:20px; width:100%; border:1px solid #ccc; border-radius:5px; overflow:hidden;">
+                <div id="migration-progress-bar" style="background:#0073aa; width:0%; height:100%; transition:width 0.3s;"></div>
+                </div>
+                <div id="migration-close-btn-container" style="text-align:right; margin-top:15px; display:none;">
+                <button id="migration-close-btn" class="button button-secondary">Close</button>
+                </div>
+            </div>
+            </div>
+            HTML;
 
         echo '</div>'; // closes .wrap
     }

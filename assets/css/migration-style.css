@@ -197,3 +197,9 @@
     border: 1px solid #ddd;
     border-radius: 4px;
 }
+
+/* Progress bar styling */
+
+#migration-progress-bar {
+    transition: width 0.3s ease;
+}

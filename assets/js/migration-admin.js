@@ -122,69 +122,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // Ensure buttons exist before adding event listeners
-    const mergeButton = document.getElementById("merge-content");
-    const buildSubpagesButton = document.getElementById("build-subpages");
-
-    if (mergeButton) {
-        mergeButton.addEventListener("click", function() {
-            let pageId = document.getElementById("existing_page").value;
-            let filePath = mergeButton.dataset.file; // Ensure this data attribute is set
-            let selectedTopLevelParent = document.getElementById("top-level-parent").value;
-
-            if (!pageId || !filePath) {
-                alert("Please select a WordPress page and a file to merge.");
-                return;
-            }
-
-            jQuery.post(migrationAdminData.ajax_url, {
-                action: "merge_content",
-                page_id: pageId,
-                file: filePath,
-                top_level_parent: selectedTopLevelParent
-            }, function(response) {
-                if (response.success) {
-                    alert("Content merged successfully!");
-                    location.reload();
-                } else {
-                    alert("Error merging content: " + response.data.message);
-                }
-            }).fail(function(xhr, textStatus, errorThrown) {
-                console.error("AJAX Error:", textStatus, errorThrown);
-                alert("AJAX request failed: " + textStatus);
-            });
-        });
-    }
-
-    if (buildSubpagesButton) {
-        buildSubpagesButton.addEventListener("click", function() {
-            let parentId = document.getElementById("parent_page").value;
-            let template = document.getElementById("template").value;
-            let subpages = document.getElementById("subpage-list").value; // Assume a JSON array of subpage filenames
-
-            if (!parentId || !template || !subpages) {
-                alert("Please select a parent page, template, and subpages to build.");
-                return;
-            }
-
-            jQuery.post(migrationAdminData.ajax_url, {
-                action: "build_subpages",
-                parent_id: parentId,
-                template: template,
-                subpages: subpages
-            }, function(response) {
-                if (response.success) {
-                    alert("Subpages built successfully!");
-                    location.reload();
-                } else {
-                    alert("Error building subpages: " + response.data.message);
-                }
-            }).fail(function(xhr, textStatus, errorThrown) {
-                console.error("AJAX Error:", textStatus, errorThrown);
-                alert("AJAX request failed: " + textStatus);
-            });
-        });
-    }
 
     // Test Airtable connection and department search
     const airtableButton = document.getElementById("test-airtable-button");

@@ -17,7 +17,7 @@ class Migration_Pages {
                 'Authorization' => 'Bearer ' . AIRTABLE_API_KEY
             ]
         ]);
-        error_log("Airtable departments response: " . print_r($response, true));
+        // error_log("Airtable departments response: " . print_r($response, true));
         if (is_wp_error($response)) {
             error_log('Error fetching Airtable departments: ' . $response->get_error_message());
             return [];
@@ -396,6 +396,13 @@ class Migration_Pages {
         }
     
         $rewritten = trim($data['output'][0]['content'][0]['text']);
+        
+        // Check if the rewritten content is empty and fall back to original if needed
+        if (empty($rewritten)) {
+            error_log("OpenAI returned empty content, falling back to original");
+            return $html;
+        }
+        
         error_log("Successfully received rewritten content via /v1/responses");
     
         return $rewritten;
@@ -412,10 +419,15 @@ class Migration_Pages {
     
         error_log("Calling OpenAI API to rewrite content for: " . $file_path);
         $rewritten = self::rewrite_with_ai($cleaned_content);
-    
-        // Save rewritten content back to content.json
-        $data['rewritten_content'] = $rewritten;
-        file_put_contents($file_path, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        
+        // Only save if we got valid rewritten content (not the fallback)
+        if ($rewritten !== $cleaned_content) {
+            // Save rewritten content back to content.json
+            $data['rewritten_content'] = $rewritten;
+            file_put_contents($file_path, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        } else {
+            error_log("Using original content as fallback for: " . $file_path);
+        }
     
         return $rewritten;
     }
@@ -560,7 +572,7 @@ class Migration_Pages {
         if (isset($_POST['clear_lock']) && $_POST['clear_lock'] === 'true') {
             $file = isset($_POST['file']) ? $_POST['file'] : '';
             if (!empty($file)) {
-                $lock_key = 'parent_page_lock_' . md5($file);
+                $lock_key = 'page_lock_' . md5($file);
                 $_SESSION[$lock_key] = false;
                 error_log("Manually cleared lock for file: " . $file);
                 wp_send_json_success(['message' => 'Lock cleared successfully']);
@@ -568,191 +580,145 @@ class Migration_Pages {
             }
         }
         
-        
-        // Check if this is a legacy format request (no process_type)
-        if (!isset($_POST['process_type'])) {
-            error_log("Legacy format request detected - redirecting to new format");
-            // Return an error to force the client to use the new format
-            // wp_send_json_error(['message' => 'You are hitting this error that comes from checking the process type.']);
-            return;
-        }
-        
-        $page_id = isset($_POST['page_id']) ? $_POST['page_id'] : '';
+        // Validate request parameters
         $file_path = isset($_POST['file']) ? MIGRATION_CLEANED_DATA . $_POST['file'] : '';
-        $build_subpages = isset($_POST['build_subpages']) && $_POST['build_subpages'] === 'true';
-        $templates = [];
-        if (isset($_POST['templates'])) {
-            error_log("Templates: " . $_POST['templates']);
-            // Don't use sanitize_text_field() on JSON strings as it can break the JSON structure
-            $templates = json_decode(stripslashes($_POST['templates']), true);
-            error_log("Templates decoded: " . print_r($templates, true));
-        }
-
-        $process_type = $_POST['process_type']; // We know this exists now
+        $page_id = isset($_POST['page_id']) ? $_POST['page_id'] : '';
+        $parent_id = isset($_POST['parent_id']) ? intval($_POST['parent_id']) : 0;
+        $top_level_parent = isset($_POST['top_level_parent']) ? intval($_POST['top_level_parent']) : 0;
+        $template = isset($_POST['template']) ? $_POST['template'] : '';
+        $is_subpage = isset($_POST['is_subpage']) && $_POST['is_subpage'] === 'true';
         
-        error_log("Merge content request received");
-        error_log("Process type: " . $process_type);
-        error_log("Page ID/option: " . $page_id);
+        error_log("Processing page request received");
         error_log("File path: " . $file_path);
-        error_log("Build subpages flag: " . ($build_subpages ? 'true' : 'false'));
-        error_log("Templates: " . print_r($templates, true));
+        error_log("Page ID/option: " . $page_id);
+        error_log("Parent ID: " . $parent_id);
+        error_log("Top level parent: " . $top_level_parent);
+        error_log("Template: " . $template);
+        error_log("Is subpage: " . ($is_subpage ? 'true' : 'false'));
         
         if (!file_exists($file_path)) {
             error_log("File not found: " . $file_path);
             wp_send_json_error(['message' => 'File not found']);
             return;
         }
-
-        $data = json_decode(file_get_contents($file_path), true);
         
-        // Process parent page
-        if ($process_type === 'parent') {
-            // Create a unique lock key for this file
-            $lock_key = 'parent_page_lock_' . md5($_POST['file']);
-            
-            // Check if this file is already being processed
-            if (isset($_SESSION[$lock_key]) && $_SESSION[$lock_key] === true) {
-                error_log("Parent page already being processed for file: " . $_POST['file']);
-                wp_send_json_error([
-                    'message' => 'This page is already being processed. Please wait.',
-                    'lock_key' => $lock_key,
-                    'file' => $_POST['file'],
-                    'can_clear' => true
-                ]);
-                return;
-            }
-            
-            // Set the lock
-            $_SESSION[$lock_key] = true;
-            
-            try {
-                $parent_template = isset($templates[0]) ? $templates[0] : '';
-                $result = self::process_parent_page($page_id, $file_path, $data, $parent_template);
-                
-                // Release the lock
-                $_SESSION[$lock_key] = false;
-                
-                if (is_wp_error($result)) {
-                    wp_send_json_error(['message' => $result->get_error_message()]);
-                    return;
-                }
-                
-                // Return success with the parent page ID for the next step
-                wp_send_json_success([
-                    'message' => 'Parent page processed successfully',
-                    'parent_page_id' => $result['page_id'],
-                    'new_page_db_id' => $result['new_page_db_id'],
-                    'has_subpages' => $build_subpages && count(self::find_subpages($_POST['file'])) > 0
-                ]);
-            } catch (Exception $e) {
-                // Release the lock in case of error
-                $_SESSION[$lock_key] = false;
-                wp_send_json_error(['message' => 'Error: ' . $e->getMessage()]);
-                return;
-            }
-        } 
-        // Process subpages
-        else if ($process_type === 'subpages') {
-            $parent_page_id = intval($_POST['parent_page_id']);
-            
-            if (!$parent_page_id) {
-                wp_send_json_error(['message' => 'Invalid parent page ID']);
-                return;
-            }
-            
-            // Create a unique lock key for subpages of this parent
-            $lock_key = 'subpages_lock_' . $parent_page_id;
-            
-            // Check if these subpages are already being processed
-            if (isset($_SESSION[$lock_key]) && $_SESSION[$lock_key] === true) {
-                error_log("Subpages already being processed for parent ID: " . $parent_page_id);
-                wp_send_json_error([
-                    'message' => 'Subpages are already being processed. Please wait.',
-                    'lock_key' => $lock_key,
-                    'parent_id' => $parent_page_id,
-                    'can_clear' => true
-                ]);
-                return;
-            }
-            
-            // Set the lock
-            $_SESSION[$lock_key] = true;
-            
-            try {
-                $tree = self::process_subpages($parent_page_id, $_POST['file'], $templates);
-
-                // Release the lock
-                $_SESSION[$lock_key] = false;
-                
-                if (is_wp_error($tree)) {
-                    wp_send_json_error(['message' => $tree->get_error_message()]);
-                    return;
-                }
-                
-                // Optionally count the number of pages processed
-                function count_tree_nodes($nodes) {
-                    $count = 0;
-                    foreach ($nodes as $node) {
-                        $count += 1 + count_tree_nodes($node['children'] ?? []);
-                    }
-                    return $count;
-                }
-                
-                $total_count = count_tree_nodes($tree);
-                
-                wp_send_json_success([
-                    'message' => 'Subpages processed successfully',
-                    'count' => $total_count,
-                    'tree' => $tree
-                ]);
-                
-            } catch (Exception $e) {
-                // Release the lock in case of error
-                $_SESSION[$lock_key] = false;
-                wp_send_json_error(['message' => 'Error: ' . $e->getMessage()]);
-                return;
-            }
-        } else {
-            wp_send_json_error(['message' => 'Invalid process type']);
+        // Create a unique lock key for this file
+        $lock_key = 'page_lock_' . md5($_POST['file']);
+        
+        // Check if this file is already being processed
+        if (isset($_SESSION[$lock_key]) && $_SESSION[$lock_key] === true) {
+            error_log("Page already being processed for file: " . $_POST['file']);
+            wp_send_json_error([
+                'message' => 'This page is already being processed. Please wait.',
+                'lock_key' => $lock_key,
+                'file' => $_POST['file'],
+                'can_clear' => true
+            ]);
+            return;
         }
-    }
-    
-    private static function count_json_files($dir) {
-        $count = 0;
-        $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS)
-        );
-    
-        foreach ($iterator as $file) {
-            if (strtolower($file->getExtension()) === 'json') {
-                $count++;
+        
+        // Set the lock
+        $_SESSION[$lock_key] = true;
+        
+        try {
+            // Get subpage tree and count before processing
+            $subpage_tree = self::build_subpage_tree($_POST['file']);
+            $subpage_count = self::count_subpage_tree_nodes($subpage_tree);
+            
+            // Process the page
+            $result = self::process_page(
+                $page_id,
+                $file_path,
+                $parent_id,
+                $top_level_parent,
+                $template,
+                $is_subpage
+            );
+            
+            // Release the lock
+            $_SESSION[$lock_key] = false;
+            
+            if (is_wp_error($result)) {
+                wp_send_json_error(['message' => $result->get_error_message()]);
+                return;
             }
+            
+            wp_send_json_success([
+                'message' => 'Page processed successfully',
+                'page_id' => $result['page_id'],
+                'new_page_db_id' => $result['new_page_db_id'],
+                'title' => $result['title'],
+                'has_subpages' => $subpage_count > 0,
+                'subpage_tree' => $subpage_tree,
+                'subpage_count' => $subpage_count,
+                'total_pages' => $subpage_count + 1  // +1 for the parent page itself
+            ]);
+        } catch (Exception $e) {
+            // Release the lock in case of error
+            $_SESSION[$lock_key] = false;
+            wp_send_json_error(['message' => 'Error: ' . $e->getMessage()]);
+            return;
         }
-    
-        return $count;
     }
     
     /**
-     * Process the parent page creation or update
+     * Process a single page (parent or subpage)
+     * 
+     * @param string|int $page_id ID of existing page or 'new_page' to create new
+     * @param string $file_path Full path to the content.json file
+     * @param int $parent_id Parent page ID (for subpages)
+     * @param int $top_level_parent Top level parent ID (for new parent pages)
+     * @param string $template Template to use for the page
+     * @param bool $is_subpage Whether this is a subpage
+     * @return array|WP_Error Result data or error
      */
-    private static function process_parent_page($page_id, $file_path, $data, $template) {
+    private static function process_page($page_id, $file_path, $parent_id = 0, $top_level_parent = 0, $template = '', $is_subpage = false) {
         global $wpdb;
-
-        $total_pages = self::count_json_files($file_path);
+        
+        if (!file_exists($file_path)) {
+            error_log("File not found: " . $file_path);
+            return new WP_Error('file_not_found', 'The specified file does not exist: ' . $file_path);
+        }
+        
+        $data = json_decode(file_get_contents($file_path), true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            error_log("JSON parse error for file: " . $file_path . " - " . json_last_error_msg());
+            return new WP_Error('json_parse_error', 'Failed to parse JSON from file: ' . json_last_error_msg());
+        }
         
         $title = isset($data['title']) ? $data['title'] : 'Untitled';
         $cleaned_content = isset($data['cleaned_content']) ? $data['cleaned_content'] : '';
-        $post_parent = isset($_POST['top_level_parent']) ? $_POST['top_level_parent'] : 0;
-        error_log("Received top_level_parent: " . $_POST['top_level_parent']);
-        error_log("Post parent: " . $post_parent);
         
-
+        if (empty($cleaned_content)) {
+            error_log("Warning: Empty content for file: " . $file_path);
+            // Continue anyway, but log the warning
+        }
         
-        $blocks = self::convert_html_to_blocks($cleaned_content, $file_path);
-        $cleaned_blocks = preg_replace('/>\s+</', '><', $blocks); // Removes inter-tag whitespace
+        // Determine the post parent
+        $post_parent = 0;
+        if ($is_subpage && $parent_id > 0) {
+            $post_parent = $parent_id;
+            error_log("Using provided parent ID for subpage: " . $parent_id);
+        } else if ($top_level_parent > 0) {
+            $post_parent = $top_level_parent;
+            error_log("Using top level parent ID: " . $top_level_parent);
+        }
+        
+        // Convert HTML to blocks
+        try {
+            $cleaned_blocks = self::convert_html_to_blocks($cleaned_content, $file_path);
+        } catch (Exception $e) {
+            error_log("Error converting HTML to blocks: " . $e->getMessage());
+            return new WP_Error('block_conversion_error', 'Failed to convert HTML to blocks: ' . $e->getMessage());
+        }
         
         $new_page_db_id = null;
-        error_log('Processing parent page and the template is: ' . $template);
+        
+        error_log("Processing page: " . $title);
+        error_log("Is subpage: " . ($is_subpage ? 'true' : 'false'));
+        error_log("Post parent: " . $post_parent);
+        error_log("Template: " . $template);
+        
         // Check if we need to create a new page
         if ($page_id === 'new_page') {
             // Use the title from the content.json file, or from the input if provided
@@ -776,7 +742,6 @@ class Migration_Pages {
             }
             
             error_log("New page created with ID: " . $page_id);
-            error_log("Post parent: " . $post_parent);
             
             // Apply template if specified and set department meta if template is department homepage
             if (!empty($template)) {
@@ -790,7 +755,7 @@ class Migration_Pages {
                 'WP_Page_ID' => $page_id,
                 'Title' => $new_page_title,
                 'URL' => get_permalink($page_id),
-                'Status' => 'New_Page_Created',
+                'Status' => $is_subpage ? 'Subpage_Created' : 'New_Page_Created',
                 'Created_At' => current_time('mysql'),
                 'Updated_At' => current_time('mysql')
             ]);
@@ -842,7 +807,7 @@ class Migration_Pages {
                 'Old_Pages',
                 [
                     'Mapped_To' => $new_page_db_id,
-                    'Status' => 'merged'
+                    'Status' => $is_subpage ? 'subpage_created' : 'merged'
                 ],
                 ['URL' => $url]
             );
@@ -855,197 +820,17 @@ class Migration_Pages {
         // Extract and store links
         if (!empty($cleaned_content)) {
             Migration_Links::extract_and_store_links($cleaned_content, $new_page_db_id);
-            error_log("Extracted links from parent page content");
+            error_log("Extracted links from page content");
         }
         
         return [
             'page_id' => $page_id,
             'new_page_db_id' => $new_page_db_id,
-            'total_pages' => $total_pages
+            'title' => $title,
+            'status' => $is_subpage ? 'subpage_created' : 'parent_created',
+            'relative_path' => $_POST['file']
         ];
     }
-    //Process subpages recursively
-    private static function process_subpages($parent_page_id, $parent_file_path, $templates, $depth = 0) {
-        global $wpdb;
-    
-        if ($depth > MIGRATION_MAX_DEPTH) {
-            error_log("Max recursion depth reached at: $parent_file_path");
-            return [];
-        }
-    
-        $subpages = self::find_subpages($parent_file_path);
-        $tree = [];
-    
-        if (empty($subpages)) {
-            error_log(str_repeat('  ', $depth) . "No subpages for: $parent_file_path");
-            return [];
-        }
-    
-        foreach ($subpages as $subpage_path) {
-            $subpage_file = MIGRATION_CLEANED_DATA . $subpage_path;
-    
-            if (!file_exists($subpage_file)) continue;
-    
-            $subpage_data = json_decode(file_get_contents($subpage_file), true);
-            $subpage_title = $subpage_data['title'] ?? 'Untitled Subpage';
-            $subpage_content = $subpage_data['cleaned_content'] ?? '';
-    
-            error_log(str_repeat('  ', $depth) . "Creating: $subpage_title");
-    
-            $blocks = self::convert_html_to_blocks($subpage_content, $subpage_file);
-            $cleaned_blocks = preg_replace('/>\s+</', '><', $blocks); // Removes inter-tag whitespace
-    
-            $new_subpage_id = wp_insert_post([
-                'post_title'   => $subpage_title,
-                'post_content' => $cleaned_blocks,
-                'post_status'  => 'publish',
-                'post_parent'  => $parent_page_id,
-                'post_type'    => 'page'
-            ]);
-    
-            if (is_wp_error($new_subpage_id)) {
-                error_log("Error creating subpage: " . $new_subpage_id->get_error_message());
-                continue;
-            }
-            
-            $current_template = isset($templates[$depth + 1]) ? $templates[$depth + 1] : '';
-            error_log("Current template: " . $current_template);
-            // set template and department meta if template is department homepage
-            if (!empty($current_template)) {
-                update_post_meta($new_subpage_id, '_wp_page_template', $current_template);
-                self::maybe_set_department_meta($new_subpage_id, $current_template, $subpage_title);
-            }
-    
-            $wpdb->insert('New_Pages', [
-                'WP_Page_ID' => $new_subpage_id,
-                'Title' => $subpage_title,
-                'URL' => get_permalink($new_subpage_id),
-                'Status' => 'merged',
-                'Created_At' => current_time('mysql'),
-                'Updated_At' => current_time('mysql')
-            ]);
-    
-            $new_subpage_db_id = $wpdb->insert_id;
-    
-            if (!empty($subpage_content)) {
-                Migration_Links::extract_and_store_links($subpage_content, $new_subpage_db_id);
-            }
-    
-            if (isset($subpage_data['url'])) {
-                $wpdb->update(
-                    'Old_Pages',
-                    ['Mapped_To' => $new_subpage_db_id, 'Status' => 'merged'],
-                    ['URL' => $subpage_data['url']]
-                );
-            }
-    
-            // 🔁 RECURSE
-            $children = self::process_subpages($new_subpage_id, $subpage_path, $templates, $depth + 1);
-    
-            // Build tree node
-            $tree[] = [
-                'title' => $subpage_title,
-                'id'    => $new_subpage_id,
-                'depth' => $depth,
-                'path'  => $subpage_path,
-                'children' => $children
-            ];
-        }
-    
-        return $tree;
-    }
-    
-    /**
-     * Process subpages for a parent page NON-RECURSIVE
-     */
-    // private static function process_subpages($parent_page_id, $parent_file_path, $template) {
-    //     global $wpdb;
-    //     $subpages = self::find_subpages($parent_file_path);
-    //     $processed_count = 0;
-        
-    //     if (empty($subpages)) {
-    //         error_log("No subpages found to process");
-    //         return 0;
-    //     }
-        
-    //     error_log("Found " . count($subpages) . " subpages to process");
-        
-    //     foreach ($subpages as $subpage_path) {
-    //         $subpage_file = MIGRATION_CLEANED_DATA . $subpage_path;
-    //         error_log("Processing subpage: " . $subpage_file);
-            
-    //         if (file_exists($subpage_file)) {
-    //             $subpage_data = json_decode(file_get_contents($subpage_file), true);
-    //             $subpage_title = isset($subpage_data['title']) ? $subpage_data['title'] : 'Untitled Subpage';
-    //             error_log("Subpage title: " . $subpage_title);
-                
-    //             $subpage_content = isset($subpage_data['cleaned_content']) ? $subpage_data['cleaned_content'] : '';
-            
-    //             $new_subpage_id = wp_insert_post([
-    //                 'post_title' => $subpage_title,
-    //                 'post_content' => self::convert_html_to_blocks($subpage_content, $subpage_file),
-    //                 'post_status' => 'publish',
-    //                 'post_parent' => $parent_page_id,
-    //                 'post_type' => 'page'
-    //             ]);
-                
-    //             if (is_wp_error($new_subpage_id)) {
-    //                 error_log("Error creating subpage: " . $new_subpage_id->get_error_message());
-    //                 continue;
-    //             }
-                
-    //             error_log("Created subpage with ID: " . $new_subpage_id);
-            
-    //             if ($template) {
-    //                 update_post_meta($new_subpage_id, '_wp_page_template', $template);
-    //                 error_log("Applied template to subpage: " . $template);
-    //             }
-                
-    //             // Update the subpage in the database tables
-    //             if ($new_subpage_id) {
-    //                 $wpdb->insert('New_Pages', [
-    //                     'WP_Page_ID' => $new_subpage_id,
-    //                     'Title' => $subpage_title,
-    //                     'URL' => get_permalink($new_subpage_id),
-    //                     'Status' => 'Subpage_Created',
-    //                     'Created_At' => current_time('mysql'),
-    //                     'Updated_At' => current_time('mysql')
-    //                 ]);
-                    
-    //                 $new_subpage_db_id = $wpdb->insert_id;
-    //                 error_log("Inserted subpage into New_Pages table with ID: " . $new_subpage_db_id);
-                    
-    //                 // Extract and store links from the subpage content
-    //                 if (!empty($subpage_content)) {
-    //                     error_log("Extracting links from subpage: " . $subpage_title);
-    //                     Migration_Links::extract_and_store_links($subpage_content, $new_subpage_db_id);
-    //                 }
-                    
-    //                 // Update Old_Pages if URL exists
-    //                 if (isset($subpage_data['url'])) {
-    //                     $wpdb->update(
-    //                         'Old_Pages',
-    //                         [
-    //                             'Mapped_To' => $new_subpage_db_id,
-    //                             'Status' => 'subpage_created'
-    //                         ],
-    //                         ['URL' => $subpage_data['url']]
-    //                     );
-                        
-    //                     error_log("Updated Old_Pages for subpage: " . $subpage_data['url'] . " → page ID " . $new_subpage_id);
-    //                 } else {
-    //                     error_log("No 'url' key found in subpage file: " . $subpage_path);
-    //                 }
-                    
-    //                 $processed_count++;
-    //             }
-    //         } else {
-    //             error_log("Subpage file does not exist: " . $subpage_file);
-    //         }
-    //     }
-        
-    //     return $processed_count;
-    // }
     
     public static function build_subpages() {
         $parent_id = intval($_POST['parent_id']);
