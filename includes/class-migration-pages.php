@@ -3,6 +3,45 @@
 class Migration_Pages {
     private static $airtable_departments_cache = null;
 
+
+    public static function add_department_to_main_menu($page_id) {
+        error_log("Calling add_department_to_main_menu");
+        if (!function_exists('wp_get_nav_menu_object')) return;
+        error_log("wp_get_nav_menu_object exists");
+        // Get the menu object by location
+        $locations = get_nav_menu_locations();
+        error_log("locations: " . print_r($locations, true));
+        if (!isset($locations['main-menu'])) {
+            error_log('Main menu location not found.');
+            return;
+        }
+    
+        $menu_id = $locations['main-menu'];
+        error_log("menu_id: " . $menu_id);
+        $menu_items = wp_get_nav_menu_items($menu_id);
+        error_log("menu_items: " . print_r($menu_items, true));
+        // Optional: Find "Departments" menu item to nest under
+        $parent_id = 0;
+        foreach ($menu_items as $item) {
+            if (trim($item->title) === 'DEPARTMENTS &amp; OFFICES') {
+                $parent_id = $item->ID;
+                error_log("parent_id: " . $parent_id);
+                break;
+            }
+        }
+    
+        // Add page to menu
+        wp_update_nav_menu_item($menu_id, 0, array(
+            'menu-item-title'     => get_the_title($page_id),
+            'menu-item-object'    => 'page',
+            'menu-item-object-id' => $page_id,
+            'menu-item-type'      => 'post_type',
+            'menu-item-status'    => 'publish',
+            'menu-item-parent-id' => $parent_id > 0 ? $parent_id : 0,
+        ));
+    }
+    
+    // Fetch Airtable departments
     private static function fetch_airtable_departments() {
         error_log("Fetching Airtable departments");
         if (self::$airtable_departments_cache !== null) {
@@ -747,7 +786,12 @@ class Migration_Pages {
             if (!empty($template)) {
                 update_post_meta($page_id, '_wp_page_template', $template);
                 error_log("Applied template to new page: " . $template);
+                // Set department meta if template is department homepage
                 self::maybe_set_department_meta($page_id, $template, $new_page_title);
+                // Add department to main menu if template is department homepage
+                if ($template === 'template-department-homepage.php') {
+                    self::add_department_to_main_menu($page_id);
+                }
             }
             
             // Insert into New_Pages table
