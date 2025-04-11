@@ -7,23 +7,23 @@ class Migration_Pages {
     public static function add_department_to_main_menu($page_id) {
         error_log("Calling add_department_to_main_menu");
         if (!function_exists('wp_get_nav_menu_object')) return;
-        error_log("wp_get_nav_menu_object exists");
+        // error_log("wp_get_nav_menu_object exists");
         // Get the menu object by location
         $locations = get_nav_menu_locations();
         error_log("locations: " . print_r($locations, true));
         if (!isset($locations['main-menu'])) {
-            error_log('Main menu location not found.');
+            // error_log('Main menu location not found.');
             return;
         }
     
         $menu_id = $locations['main-menu'];
-        error_log("menu_id: " . $menu_id);
+        // error_log("menu_id: " . $menu_id);
         $menu_items = wp_get_nav_menu_items($menu_id);
-        error_log("menu_items: " . print_r($menu_items, true));
+        // error_log("menu_items: " . print_r($menu_items, true));
         // Optional: Find "Departments" menu item to nest under
         $parent_id = 0;
         foreach ($menu_items as $item) {
-            if (trim($item->title) === 'DEPARTMENTS &amp; OFFICES') {
+            if (trim($item->title) === 'DEPARTMENTS &#038; OFFICES') {
                 $parent_id = $item->ID;
                 error_log("parent_id: " . $parent_id);
                 break;
