@@ -5,6 +5,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const mergeButton = document.getElementById("merge-content");
     const closeBtn = document.getElementById('migration-close-btn');
     let processedFiles = new Set();
+    // Define pageQueue at a higher scope level
+    let pageQueue = [];
     
     if (closeBtn) {
         closeBtn.addEventListener('click', function () {
@@ -34,14 +36,35 @@ document.addEventListener('DOMContentLoaded', function() {
             completed: 0,
             update: function (message) {
                 this.completed++;
-                const percent = Math.round((this.completed / this.total) * 100);
+                const percent = Math.min(Math.round((this.completed / this.total) * 100), 99); // Cap at 99% until truly complete
                 bar.style.width = percent + '%';
                 status.textContent = message || `Processing page ${this.completed} of ${this.total}`;
     
-                if (this.completed === this.total) {
+                if (this.completed === this.total && pageQueue.length === 0) {
+                    // Only show completion when queue is empty AND all counted pages are done
+                    bar.style.width = '100%';
                     status.textContent = "✅ All pages processed!";
                     if (closeBtnContainer) closeBtnContainer.style.display = 'block';
                 }
+            },
+            // Add ability to update the total count when new pages are discovered
+            updateTotal: function(newTotal) {
+                console.log(`Updating total pages from ${this.total} to ${newTotal}`);
+                this.total = newTotal;
+                // Recalculate percentage based on new total
+                const percent = Math.min(Math.round((this.completed / this.total) * 100), 99);
+                bar.style.width = percent + '%';
+                status.textContent = `Processing page ${this.completed} of ${this.total}`;
+            },
+            showMessage: function(message, isError = false) {
+                status.textContent = isError ? `❌ ${message}` : message;
+                if (isError && closeBtnContainer) closeBtnContainer.style.display = 'block';
+            },
+            // Add a method to explicitly complete the progress
+            complete: function(message) {
+                bar.style.width = '100%';
+                status.textContent = message || "✅ All pages processed!";
+                if (closeBtnContainer) closeBtnContainer.style.display = 'block';
             }
         };
     }
@@ -51,8 +74,6 @@ document.addEventListener('DOMContentLoaded', function() {
     if (mergeButton) {
         // Flag to prevent multiple submissions
         let isProcessing = false;
-        // Queue for processing pages
-        let pageQueue = [];
         // Track processed pages for tree display
         let processedPages = [];
         
@@ -67,7 +88,8 @@ document.addEventListener('DOMContentLoaded', function() {
             // Prevent multiple submissions
             if (isProcessing) {
                 console.log("Already processing a request, ignoring click");
-                alert("A request is already being processed. Please wait.");
+                if (!window.migrationProgress) showProgressBar(1);
+                window.migrationProgress.showMessage("A request is already being processed. Please wait.");
                 return;
             }
             
@@ -108,7 +130,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 // We'll use the title from the content.json file if this is empty
             } else if (!pageId) {
-                alert("Please select a destination page or choose to create a new page.");
+                if (!window.migrationProgress) showProgressBar(1);
+                window.migrationProgress.showMessage("Please select a destination page or choose to create a new page.", true);
                 isProcessing = false;
                 return;
             }
@@ -123,10 +146,16 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             
             if (!filePath) {
-                alert("No file selected to process.");
+                if (!window.migrationProgress) showProgressBar(1);
+                window.migrationProgress.showMessage("No file selected to process.", true);
                 isProcessing = false;
                 return;
             }
+            
+            // Show progress modal immediately after validation but before AJAX request
+            // Use a reasonable initial estimate for total pages (we'll update this later)
+            showProgressBar(1);
+            window.migrationProgress.showMessage("Preparing to process content...");
             
             // Initialize the page queue with the parent page
             pageQueue = [{
@@ -157,7 +186,14 @@ document.addEventListener('DOMContentLoaded', function() {
             if (pageQueue.length === 0) {
                 // Queue is empty, we're done
                 if (window.migrationProgress) {
-                    window.migrationProgress.update("All pages processed successfully!");
+                    window.migrationProgress.showMessage("✅ Content processing completed!");
+                    // Ensure progress bar shows 100%
+                    const bar = document.getElementById('migration-progress-bar');
+                    if (bar) bar.style.width = '100%';
+                    
+                    // Make sure close button is visible
+                    const closeBtnContainer = document.getElementById('migration-close-btn-container');
+                    if (closeBtnContainer) closeBtnContainer.style.display = 'block';
                 }
                 mergeButton.disabled = false;
                 mergeButton.textContent = "Merge Content";
@@ -166,7 +202,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Display the tree of processed pages
                 displayProcessedPagesTree();
                 
-                alert("Content processing completed!");
                 return;
             }
             
@@ -197,7 +232,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (window.migrationProgress) {
                 const pageType = page.isSubpage ? 'subpage' : 'parent page';
                 const levelInfo = page.isSubpage ? ` (level ${page.level})` : '';
-                window.migrationProgress.update(`Processing ${pageType}: "${page.title || 'Untitled'}"${levelInfo}`);
+                window.migrationProgress.showMessage(`Processing ${pageType}: "${page.title || 'Untitled'}"${levelInfo}`);
             }
             
             // Create the data object for page processing
@@ -223,9 +258,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (response.success) {
                         console.log("Page processed successfully:", response.data);
                         
-                        // Initialize progress bar if this is the first page
-                        if (!window.migrationProgress && response.data.total_pages) {
-                            showProgressBar(response.data.total_pages);
+                        // Update total pages count if this is the first response
+                        if (response.data.total_pages && window.migrationProgress.total <= 1) {
+                            window.migrationProgress.updateTotal(response.data.total_pages);
                         }
                         
                         if (window.migrationProgress) {
@@ -262,6 +297,11 @@ document.addEventListener('DOMContentLoaded', function() {
                                 1  // Start at level 1 for immediate children
                             );
                             
+                            // Update the total count to include these newly discovered subpages
+                            if (window.migrationProgress) {
+                                window.migrationProgress.updateTotal(window.migrationProgress.total + subpageQueue.length);
+                            }
+                            
                             // Add subpages to the beginning of the queue
                             pageQueue = subpageQueue.concat(pageQueue);
                             
@@ -276,8 +316,24 @@ document.addEventListener('DOMContentLoaded', function() {
                         mergeButton.textContent = "Merge Content";
                         isProcessing = false;
                         
-                        if (confirm(response.data.message + "\n\nWould you like to clear the lock and try again?")) {
-                            clearLock(page.file);
+                        // Initialize progress modal if needed
+                        if (!window.migrationProgress) showProgressBar(1);
+                        
+                        const errorMsg = response.data.message || "Unknown error";
+                        window.migrationProgress.showMessage(`${errorMsg} - Would you like to clear the lock and try again?`, true);
+                        
+                        // Add clear lock button to modal
+                        const status = document.getElementById('migration-status');
+                        if (status) {
+                            const clearLockBtn = document.createElement('button');
+                            clearLockBtn.textContent = "Clear Lock";
+                            clearLockBtn.className = "button button-primary";
+                            clearLockBtn.style.marginTop = "10px";
+                            clearLockBtn.onclick = function() {
+                                clearLock(page.file);
+                                this.remove(); // Remove button after clicking
+                            };
+                            status.appendChild(clearLockBtn);
                         }
                     } else {
                         mergeButton.disabled = false;
@@ -289,11 +345,23 @@ document.addEventListener('DOMContentLoaded', function() {
                             : "Unknown error";
                         
                         console.error("Error processing page:", errorMsg);
-                        alert(`Error processing page "${page.title || 'Untitled'}": ${errorMsg}`);
                         
-                        // Continue with the next page despite the error
-                        if (confirm("Would you like to continue processing the remaining pages?")) {
-                            processNextPage();
+                        // Replace alert with modal message
+                        if (!window.migrationProgress) showProgressBar(1);
+                        window.migrationProgress.showMessage(`Error processing page "${page.title || 'Untitled'}": ${errorMsg}`, true);
+                        
+                        // Add continue button to modal
+                        const status = document.getElementById('migration-status');
+                        if (status) {
+                            const continueBtn = document.createElement('button');
+                            continueBtn.textContent = "Continue Processing";
+                            continueBtn.className = "button button-primary";
+                            continueBtn.style.marginTop = "10px";
+                            continueBtn.onclick = function() {
+                                processNextPage();
+                                this.remove(); // Remove button after clicking
+                            };
+                            status.appendChild(continueBtn);
                         }
                     }
                 },
@@ -314,15 +382,26 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     }
                     
-                    alert(`AJAX request failed: ${textStatus}\n${errorThrown}\n\nDetails: ${errorDetails}`);
+                    // Replace alert with modal message
+                    if (!window.migrationProgress) showProgressBar(1);
+                    window.migrationProgress.showMessage(`AJAX request failed: ${textStatus}\n${errorThrown}\n\nDetails: ${errorDetails}`, true);
                     
                     mergeButton.disabled = false;
                     mergeButton.textContent = "Merge Content";
                     isProcessing = false;
                     
-                    // Option to continue despite the error
-                    if (confirm("Would you like to continue processing the remaining pages?")) {
-                        processNextPage();
+                    // Add continue button to modal
+                    const status = document.getElementById('migration-status');
+                    if (status) {
+                        const continueBtn = document.createElement('button');
+                        continueBtn.textContent = "Continue Processing";
+                        continueBtn.className = "button button-primary";
+                        continueBtn.style.marginTop = "10px";
+                        continueBtn.onclick = function() {
+                            processNextPage();
+                            this.remove(); // Remove button after clicking
+                        };
+                        status.appendChild(continueBtn);
                     }
                 }
             });
@@ -428,14 +507,23 @@ document.addEventListener('DOMContentLoaded', function() {
                 data: postData,
                 success: function(response) {
                     if (response.success) {
-                        alert("Lock cleared successfully. You can now try again.");
+                        // Replace alert with modal message
+                        if (window.migrationProgress) {
+                            window.migrationProgress.showMessage("Lock cleared successfully. You can now try again.");
+                        }
                     } else {
-                        alert("Error clearing lock: " + (response.data ? response.data.message : "Unknown error"));
+                        // Replace alert with modal message
+                        if (window.migrationProgress) {
+                            window.migrationProgress.showMessage("Error clearing lock: " + (response.data ? response.data.message : "Unknown error"), true);
+                        }
                     }
                 },
                 error: function(xhr, textStatus, errorThrown) {
                     console.error("AJAX Error:", textStatus, errorThrown);
-                    alert("Failed to clear lock: " + textStatus);
+                    // Replace alert with modal message
+                    if (window.migrationProgress) {
+                        window.migrationProgress.showMessage("Failed to clear lock: " + textStatus, true);
+                    }
                 }
             });
         }
