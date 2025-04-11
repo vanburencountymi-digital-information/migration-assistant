@@ -242,13 +242,11 @@ document.addEventListener('DOMContentLoaded', function() {
                             level: page.level
                         });
                         
-                        // Update parent IDs for any children in the queue if this page has childrenIndices
-                        if (page.childrenIndices && page.childrenIndices.length > 0) {
-                            page.childrenIndices.forEach(index => {
-                                if (pageQueue[index - processedPages.length]) {
-                                    pageQueue[index - processedPages.length].parentId = response.data.page_id;
-                                    console.log(`Updated parent ID for child at index ${index} to ${response.data.page_id}`);
-                                }
+                        // Update parent IDs for any children using direct object references
+                        if (page.childrenRefs && page.childrenRefs.length > 0) {
+                            page.childrenRefs.forEach(child => {
+                                child.parentId = response.data.page_id;
+                                console.log(`Updated parent ID for child "${child.title}" to ${response.data.page_id}`);
                             });
                         }
                         
@@ -361,12 +359,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     // Store the index of this node in the flat list
                     const nodeIndex = flatList.length - 1;
                     
-                    // Add a callback to update the parent ID after this node is processed
-                    flatList[nodeIndex].childrenIndices = [];
+                    // Store direct references to child objects instead of indices
+                    flatList[nodeIndex].childrenRefs = [];
                     
-                    // Add children to the flat list and store their indices
+                    // Add children to the flat list and store direct references
                     childrenWithPlaceholderParent.forEach(child => {
-                        flatList[nodeIndex].childrenIndices.push(flatList.length);
+                        flatList[nodeIndex].childrenRefs.push(child);  // Store object reference
                         flatList.push(child);
                     });
                 }
