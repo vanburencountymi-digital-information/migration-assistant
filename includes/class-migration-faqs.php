@@ -50,8 +50,14 @@ class Migration_FAQs {
         // Process each row
         while (($row = fgetcsv($file)) !== false) {
             $raw_cat = isset($row[$category_index]) ? trim($row[$category_index]) : '';
+            
+            // Decode HTML entities in the question and answer
             $question = isset($row[$question_index]) ? trim($row[$question_index]) : '';
+            $question = html_entity_decode($question, ENT_QUOTES | ENT_HTML401, 'UTF-8');
+            
             $answer = isset($row[$answer_index]) ? trim($row[$answer_index]) : '';
+            // We don't decode HTML entities in the answer as it may contain legitimate HTML formatting
+            
             $question_status = isset($row[$question_status_index]) ? trim($row[$question_status_index]) : '';
             
             // Skip if question or answer is empty
@@ -67,6 +73,9 @@ class Migration_FAQs {
             // --- CATEGORY PARSING & TERM CREATION ---
             $term_ids = [];
             if (!empty($raw_cat)) {
+                // Decode HTML entities in category names too
+                $raw_cat = html_entity_decode($raw_cat, ENT_QUOTES | ENT_HTML401, 'UTF-8');
+                
                 if (strpos($raw_cat, '-') !== false) {
                     list($parent_name, $child_name) = array_map('trim', explode('-', $raw_cat, 2));
                     
