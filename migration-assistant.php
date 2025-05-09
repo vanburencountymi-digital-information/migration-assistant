@@ -21,6 +21,7 @@ require_once MIGRATION_PLUGIN_DIR . 'includes/class-migration-links.php';
 require_once MIGRATION_PLUGIN_DIR . 'includes/class-migration-bulk.php';
 require_once MIGRATION_PLUGIN_DIR . 'includes/class-migration-templates.php';
 require_once MIGRATION_PLUGIN_DIR . 'includes/migration-functions.php';
+require_once MIGRATION_PLUGIN_DIR . 'includes/class-migration-faqs.php';
 
 // Hook plugin activation to setup function
 register_activation_hook(__FILE__, 'migration_assistant_activate');

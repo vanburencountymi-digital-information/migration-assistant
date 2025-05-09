@@ -213,10 +213,15 @@ class Migration_Links {
     public static function fix_all_links() {
         global $wpdb;
     
+        error_log("Starting fix_all_links process");
+        
         // Get all links with a New_URL (including broken ones)
         $links = $wpdb->get_results("SELECT ID, Old_URL, New_URL, Status FROM Links WHERE New_URL IS NOT NULL");
+        error_log("Found " . count($links) . " links with New_URL values to process");
     
         foreach ($links as $link) {
+            error_log("Processing link ID: {$link->ID}, Old_URL: {$link->Old_URL}, New_URL: {$link->New_URL}, Status: {$link->Status}");
+            
             $occurrences = $wpdb->get_results($wpdb->prepare(
                 "SELECT lo.New_Page_ID, np.WP_Page_ID
                  FROM Link_Occurences lo
@@ -224,15 +229,26 @@ class Migration_Links {
                  WHERE lo.Link_ID = %d",
                 $link->ID
             ));
+            
+            error_log("Found " . count($occurrences) . " occurrences of this link");
     
             foreach ($occurrences as $occurrence) {
                 $wp_page_id = intval($occurrence->WP_Page_ID);
+                error_log("Processing occurrence on WP page ID: {$wp_page_id}");
     
                 // Load current post content
                 $post = get_post($wp_page_id);
-                if (!$post) continue;
+                if (!$post) {
+                    error_log("Could not load post with ID {$wp_page_id}");
+                    continue;
+                }
+    
+                $updated_content = $post->post_content;
+                $made_changes = false;
     
                 if ($link->Status === 'broken') {
+                    error_log("Link is marked as broken, will mark it visually in content");
+                    
                     // For broken links, replace with a visually distinct marker
                     $broken_link_html = '<a href="#broken-link" class="broken-link" title="Original URL: ' . esc_attr($link->Old_URL) . '" style="color: red; text-decoration: line-through;">';
                     
@@ -240,23 +256,147 @@ class Migration_Links {
                     $pattern = '/<a[^>]*href=["\']' . preg_quote($link->Old_URL, '/') . '["\'][^>]*>(.*?)<\/a>/i';
                     $replacement = $broken_link_html . '$1</a> <span class="broken-link-note" style="color: red; font-size: 0.8em;">[Broken Link]</span>';
                     
-                    $updated_content = preg_replace($pattern, $replacement, $post->post_content);
+                    // Log the pattern we're searching for
+                    error_log("Searching for pattern: " . $pattern);
+                    
+                    $new_content = preg_replace($pattern, $replacement, $updated_content);
+                    if ($new_content !== $updated_content) {
+                        error_log("Found and marked broken link in content");
+                        $updated_content = $new_content;
+                        $made_changes = true;
+                    } else {
+                        error_log("Did not find the broken link pattern in content");
+                    }
                 } else {
-                    // For working links, just update the URL
-                    $updated_content = str_replace($link->Old_URL, $link->New_URL, $post->post_content);
+                    error_log("Link is not broken, attempting to update it");
+                    
+                    // For working links, first try direct URL replacement
+                    $old_href = 'href="' . $link->Old_URL . '"';
+                    $new_href = 'href="' . $link->New_URL . '"';
+                    
+                    error_log("Attempting direct replacement: {$old_href} -> {$new_href}");
+                    
+                    $new_content = str_replace($old_href, $new_href, $updated_content);
+                    
+                    if ($new_content !== $updated_content) {
+                        error_log("Direct replacement successful");
+                        $updated_content = $new_content;
+                        $made_changes = true;
+                    } else {
+                        error_log("Direct replacement failed, trying title attribute pattern");
+                        
+                        // If direct replacement didn't work, try finding links with the title attribute
+                        // First, let's get the actual title attribute value as it would appear in HTML
+                        $title_value = "Original URL: " . $link->Old_URL;
+                        error_log("Looking for title attribute with value: " . $title_value);
+                        
+                        // Use a more robust approach with DOM parsing instead of regex for complex URLs
+                        $dom = new DOMDocument();
+                        libxml_use_internal_errors(true); // Suppress HTML5 parsing errors
+                        $dom->loadHTML($updated_content);
+                        libxml_clear_errors();
+                        
+                        $xpath = new DOMXPath($dom);
+                        $broken_links = $xpath->query("//a[contains(@title, 'Original URL: " . addslashes($link->Old_URL) . "') and @href='#broken-link']");
+                        
+                        error_log("Found " . $broken_links->length . " broken links with matching title attribute");
+                        
+                        if ($broken_links->length > 0) {
+                            // We found matches, now we need to replace them in the original HTML
+                            foreach ($broken_links as $broken_link) {
+                                error_log("Processing broken link: " . $dom->saveHTML($broken_link));
+                                
+                                // Create a new link with the correct href
+                                $new_link = $dom->createElement('a', $broken_link->textContent);
+                                $new_link->setAttribute('href', $link->New_URL);
+                                
+                                // Replace the old link with the new one
+                                $broken_link->parentNode->replaceChild($new_link, $broken_link);
+                                
+                                // Find and remove the [Broken Link] span that follows
+                                $next_sibling = $new_link->nextSibling;
+                                while ($next_sibling) {
+                                    // Check if this is a text node (whitespace) or an element
+                                    if ($next_sibling->nodeType === XML_TEXT_NODE) {
+                                        // Just move to the next sibling
+                                        $next_sibling = $next_sibling->nextSibling;
+                                        continue;
+                                    }
+                                    
+                                    // If we found an element node
+                                    if ($next_sibling->nodeType === XML_ELEMENT_NODE) {
+                                        // Check if it's our span
+                                        if ($next_sibling->nodeName === 'span' && 
+                                            strpos($next_sibling->getAttribute('class'), 'broken-link-note') !== false) {
+                                            error_log("Found and removing broken-link-note span");
+                                            $to_remove = $next_sibling;
+                                            $next_sibling = $next_sibling->nextSibling; // Move to next before removing
+                                            $to_remove->parentNode->removeChild($to_remove);
+                                        } else {
+                                            // If it's some other element, we're done looking
+                                            break;
+                                        }
+                                    } else {
+                                        // If it's not a text node or element node, move on
+                                        $next_sibling = $next_sibling->nextSibling;
+                                    }
+                                }
+                            }
+                            
+                            // Get the updated HTML
+                            $new_content = $dom->saveHTML();
+                            error_log("DOM replacement completed");
+                            
+                            if ($new_content !== $updated_content) {
+                                error_log("Fixed previously broken link using DOM parsing");
+                                $updated_content = $new_content;
+                                $made_changes = true;
+                            } else {
+                                error_log("DOM replacement didn't change content despite finding matches");
+                            }
+                        } else {
+                            error_log("No broken links found with DOM parsing, trying fallback regex approach");
+                            
+                            // Try a more lenient pattern that just looks for the title attribute and href=#broken-link
+                            $lenient_pattern = '/<a[^>]*title=["\'][^"\']*' . preg_quote($link->Old_URL, '/') . '[^"\']*["\'][^>]*href=["\']#broken-link["\'][^>]*>(.*?)<\/a>/i';
+                            error_log("Trying lenient pattern: " . $lenient_pattern);
+                            
+                            if (preg_match($lenient_pattern, $updated_content, $matches)) {
+                                error_log("Found match with lenient pattern. Match: " . print_r($matches, true));
+                                
+                                $lenient_replacement = '<a href="' . esc_attr($link->New_URL) . '">' . '$1</a>';
+                                $new_content = preg_replace($lenient_pattern, $lenient_replacement, $updated_content);
+                                
+                                if ($new_content !== $updated_content) {
+                                    error_log("Lenient pattern replacement successful");
+                                    $updated_content = $new_content;
+                                    $made_changes = true;
+                                } else {
+                                    error_log("Lenient pattern replacement failed despite finding a match");
+                                }
+                            } else {
+                                error_log("No match found with lenient pattern either");
+                            }
+                        }
+                    }
                     
                     // Update the Status to 'resolved' if it's not already
                     if ($link->Status !== 'resolved') {
-                        $wpdb->update(
-                            'Links',
-                            ['Status' => 'resolved'],
-                            ['ID' => $link->ID]
-                        );
-                        error_log("Updated link status to 'resolved' for ID {$link->ID}");
+                        if ($made_changes) {
+                            error_log("Updating link status to 'resolved' for ID {$link->ID} because changes were made");
+                            $wpdb->update(
+                                'Links',
+                                ['Status' => 'resolved'],
+                                ['ID' => $link->ID]
+                            );
+                        } else {
+                            error_log("NOT updating link status to 'resolved' for ID {$link->ID} because no changes were made");
+                        }
                     }
                 }
     
-                if ($updated_content !== $post->post_content) {
+                if ($made_changes) {
+                    error_log("Updating post content for page ID {$wp_page_id}");
                     wp_update_post([
                         'ID' => $wp_page_id,
                         'post_content' => $updated_content
@@ -264,6 +404,8 @@ class Migration_Links {
     
                     $status_text = ($link->Status === 'broken') ? " (marked as broken)" : "";
                     error_log("Fixed link on page ID {$wp_page_id}: {$link->Old_URL} → {$link->New_URL}{$status_text}");
+                } else {
+                    error_log("No changes made to page ID {$wp_page_id}");
                 }
             }
         }
@@ -279,6 +421,253 @@ class Migration_Links {
         error_log("Link fixing completed.");
     }
     
+    public static function fix_specific_link($link_id) {
+        global $wpdb;
+        
+        error_log("Starting fix_specific_link for link ID: $link_id");
+        
+        // Get the link details
+        $link = $wpdb->get_row($wpdb->prepare("SELECT ID, Old_URL, New_URL, Status FROM Links WHERE ID = %d", $link_id));
+        
+        if (!$link || !$link->New_URL) {
+            error_log("Link not found or has no New_URL");
+            return 0;
+        }
+        
+        $fixed_count = 0;
+        
+        // Get all occurrences of this link
+        $occurrences = $wpdb->get_results($wpdb->prepare(
+            "SELECT lo.New_Page_ID, np.WP_Page_ID
+             FROM Link_Occurences lo
+             JOIN New_Pages np ON lo.New_Page_ID = np.ID
+             WHERE lo.Link_ID = %d",
+            $link_id
+        ));
+        
+        error_log("Found " . count($occurrences) . " occurrences of link ID: $link_id");
+        
+        foreach ($occurrences as $occurrence) {
+            $wp_page_id = intval($occurrence->WP_Page_ID);
+            
+            // Load current post content
+            $post = get_post($wp_page_id);
+            if (!$post) continue;
+            
+            $updated_content = $post->post_content;
+            $made_changes = false;
+            
+            // Use DOM parsing to find and update the link
+            $dom = new DOMDocument();
+            libxml_use_internal_errors(true); // Suppress HTML5 parsing errors
+            $dom->loadHTML(mb_convert_encoding($updated_content, 'HTML-ENTITIES', 'UTF-8'));
+            libxml_clear_errors();
+            
+            $xpath = new DOMXPath($dom);
+            
+            // Try to find the link by its original URL
+            $links_to_update = $xpath->query("//a[contains(@href, '" . addslashes($link->Old_URL) . "')]");
+            
+            // If not found, try to find it by title attribute (for previously marked broken links)
+            if ($links_to_update->length === 0) {
+                $links_to_update = $xpath->query("//a[contains(@title, 'Original URL: " . addslashes($link->Old_URL) . "') and @href='#broken-link']");
+            }
+            
+            error_log("Found " . $links_to_update->length . " links to update in post ID: $wp_page_id");
+            
+            if ($links_to_update->length > 0) {
+                foreach ($links_to_update as $link_to_update) {
+                    // Update the href attribute
+                    $link_to_update->setAttribute('href', $link->New_URL);
+                    
+                    // Remove any broken link styling
+                    $link_to_update->removeAttribute('class');
+                    $link_to_update->removeAttribute('style');
+                    
+                    // Find and remove the [Broken Link] span if it exists
+                    $next_sibling = $link_to_update->nextSibling;
+                    while ($next_sibling) {
+                        if ($next_sibling->nodeType === XML_TEXT_NODE) {
+                            $next_sibling = $next_sibling->nextSibling;
+                            continue;
+                        }
+                        
+                        if ($next_sibling->nodeType === XML_ELEMENT_NODE) {
+                            if ($next_sibling->nodeName === 'span' && 
+                                strpos($next_sibling->getAttribute('class'), 'broken-link-note') !== false) {
+                                $to_remove = $next_sibling;
+                                $next_sibling = $next_sibling->nextSibling;
+                                $to_remove->parentNode->removeChild($to_remove);
+                            } else {
+                                break;
+                            }
+                        } else {
+                            $next_sibling = $next_sibling->nextSibling;
+                        }
+                    }
+                }
+                
+                // Get the updated HTML
+                $new_content = $dom->saveHTML();
+                
+                if ($new_content !== $updated_content) {
+                    wp_update_post([
+                        'ID' => $wp_page_id,
+                        'post_content' => $new_content
+                    ]);
+                    
+                    $fixed_count++;
+                    error_log("Fixed link on page ID {$wp_page_id}: {$link->Old_URL} → {$link->New_URL}");
+                }
+            }
+        }
+        
+        // Update the link status to resolved
+        $wpdb->update(
+            'Links',
+            ['Status' => 'resolved'],
+            ['ID' => $link_id]
+        );
+        
+        error_log("Link fixing completed for link ID: $link_id. Fixed $fixed_count occurrences.");
+        
+        return $fixed_count;
+    }
+
+    /**
+     * Fix URLs with incorrect path segments
+     * 
+     * This function specifically targets URLs with the incorrect "departments-offices" segment
+     * in court-related URLs and removes it.
+     */
+    public static function fix_court_urls() {
+        global $wpdb;
+        
+        error_log("Starting fix_court_urls process");
+        
+        // Find all links with the incorrect pattern
+        $incorrect_links = $wpdb->get_results("
+            SELECT ID, Old_URL, New_URL 
+            FROM Links 
+            WHERE New_URL LIKE '/departments/departments-offices/county-courts/%'
+        ");
+        
+        error_log("Found " . count($incorrect_links) . " links with incorrect court URLs");
+        
+        $fixed_count = 0;
+        
+        foreach ($incorrect_links as $link) {
+            // Create the corrected URL by removing the extra segment
+            $corrected_url = str_replace('/departments/departments-offices/county-courts/', '/departments/county-courts/', $link->New_URL);
+            
+            error_log("Fixing link ID {$link->ID}: {$link->New_URL} → {$corrected_url}");
+            
+            // Update the link in the database and set status to unresolved to ensure it gets processed
+            $wpdb->update(
+                'Links',
+                [
+                    'New_URL' => $corrected_url,
+                    'Status' => 'unresolved'  // Set to unresolved so fix_all_links will process it
+                ],
+                ['ID' => $link->ID]
+            );
+            
+            $fixed_count++;
+        }
+        
+        error_log("Fixed $fixed_count links with incorrect court URLs and set them to unresolved status");
+        
+        // Now run fix_all_links to update the content with the corrected URLs
+        if ($fixed_count > 0) {
+            self::fix_all_links();
+        }
+        
+        return $fixed_count;
+    }
+
+    /**
+     * Fix court URLs in content that have the incorrect path segment
+     */
+    public static function fix_court_urls_in_content() {
+        global $wpdb;
+        
+        error_log("Starting fix_court_urls_in_content process");
+        
+        // Get all links with the corrected court URLs
+        $court_links = $wpdb->get_results("
+            SELECT ID, Old_URL, New_URL 
+            FROM Links 
+            WHERE New_URL LIKE '/departments/county-courts/%'
+        ");
+        
+        error_log("Found " . count($court_links) . " court links to process");
+        
+        $fixed_count = 0;
+        $page_count = 0;
+        
+        foreach ($court_links as $link) {
+            // Construct the incorrect URL that's currently in the content
+            $incorrect_url = str_replace('/departments/county-courts/', '/departments/departments-offices/county-courts/', $link->New_URL);
+            
+            error_log("Looking to replace incorrect URL: {$incorrect_url} with correct URL: {$link->New_URL}");
+            
+            // Get all occurrences of this link
+            $occurrences = $wpdb->get_results($wpdb->prepare(
+                "SELECT lo.New_Page_ID, np.WP_Page_ID
+                 FROM Link_Occurences lo
+                 JOIN New_Pages np ON lo.New_Page_ID = np.ID
+                 WHERE lo.Link_ID = %d",
+                $link->ID
+            ));
+            
+            foreach ($occurrences as $occurrence) {
+                $wp_page_id = intval($occurrence->WP_Page_ID);
+                
+                // Load current post content
+                $post = get_post($wp_page_id);
+                if (!$post) continue;
+                
+                // Check if the incorrect URL exists in the content
+                if (strpos($post->post_content, $incorrect_url) === false) {
+                    continue; // Skip if the incorrect URL isn't found
+                }
+                
+                // Replace the incorrect URL with the correct one
+                $updated_content = str_replace(
+                    'href="' . $incorrect_url . '"', 
+                    'href="' . $link->New_URL . '"', 
+                    $post->post_content
+                );
+                
+                if ($updated_content !== $post->post_content) {
+                    // Update the post content
+                    wp_update_post([
+                        'ID' => $wp_page_id,
+                        'post_content' => $updated_content
+                    ]);
+                    
+                    $fixed_count++;
+                    error_log("Fixed court URL on page ID {$wp_page_id}: {$incorrect_url} → {$link->New_URL}");
+                }
+            }
+            
+            // Update the link status to resolved
+            $wpdb->update(
+                'Links',
+                ['Status' => 'resolved'],
+                ['ID' => $link->ID]
+            );
+            
+            $page_count++;
+        }
+        
+        error_log("Court URL fixing completed. Fixed {$fixed_count} URLs across {$page_count} pages.");
+        
+        return [
+            'fixed_count' => $fixed_count,
+            'page_count' => $page_count
+        ];
+    }
 }
 
 add_action('admin_init', function() {
