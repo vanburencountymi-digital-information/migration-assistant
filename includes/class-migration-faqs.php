@@ -51,12 +51,17 @@ class Migration_FAQs {
         while (($row = fgetcsv($file)) !== false) {
             $raw_cat = isset($row[$category_index]) ? trim($row[$category_index]) : '';
             
-            // Decode HTML entities in the question and answer
+            // Get the question and thoroughly clean it
             $question = isset($row[$question_index]) ? trim($row[$question_index]) : '';
-            $question = html_entity_decode($question, ENT_QUOTES | ENT_HTML401, 'UTF-8');
             
+            // Apply multiple layers of decoding for deeply encoded entities
+            $question = self::deep_decode($question);
+            
+            // Get and process the answer
             $answer = isset($row[$answer_index]) ? trim($row[$answer_index]) : '';
-            // We don't decode HTML entities in the answer as it may contain legitimate HTML formatting
+            
+            // For the answer, we still want to preserve HTML, but fix any mangled entities
+            $answer = self::fix_encoded_entities($answer);
             
             $question_status = isset($row[$question_status_index]) ? trim($row[$question_status_index]) : '';
             
@@ -73,8 +78,8 @@ class Migration_FAQs {
             // --- CATEGORY PARSING & TERM CREATION ---
             $term_ids = [];
             if (!empty($raw_cat)) {
-                // Decode HTML entities in category names too
-                $raw_cat = html_entity_decode($raw_cat, ENT_QUOTES | ENT_HTML401, 'UTF-8');
+                // Thoroughly decode the category name
+                $raw_cat = self::deep_decode($raw_cat);
                 
                 if (strpos($raw_cat, '-') !== false) {
                     list($parent_name, $child_name) = array_map('trim', explode('-', $raw_cat, 2));
@@ -108,7 +113,7 @@ class Migration_FAQs {
             // --- INSERT FAQ POST ---
             $post_id = wp_insert_post([
                 'post_type'    => $faq_pt,
-                'post_title'   => wp_strip_all_tags($question),
+                'post_title'   => $question, // Don't use wp_strip_all_tags here as it might re-encode
                 'post_content' => $answer,
                 'post_status'  => 'publish',
             ]);
@@ -125,5 +130,47 @@ class Migration_FAQs {
         
         fclose($file);
         return $imported_count;
+    }
+    
+    /**
+     * Deeply decode HTML entities, handling multiple layers of encoding
+     *
+     * @param string $text The text to decode
+     * @return string The decoded text
+     */
+    private static function deep_decode($text) {
+        // First convert any numeric HTML entities to their character representation
+        $text = preg_replace_callback('/&#(\d+);/', function($matches) {
+            return chr($matches[1]);
+        }, $text);
+        
+        // Then handle any remaining named entities
+        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML401, 'UTF-8');
+        
+        // Do a second pass to catch any double-encoding
+        if (strpos($text, '&') !== false) {
+            $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML401, 'UTF-8');
+        }
+        
+        // Finally, manually fix common problematic sequences
+        $text = str_replace(['&#34;', '&#34', '&quot;', '&quot'], '"', $text);
+        $text = str_replace(['&#39;', '&#39', '&apos;', '&apos'], "'", $text);
+        $text = str_replace(['&amp;'], '&', $text);
+        
+        return $text;
+    }
+    
+    /**
+     * Fix encoded entities in HTML content without breaking the HTML
+     *
+     * @param string $html The HTML content
+     * @return string The fixed HTML content
+     */
+    private static function fix_encoded_entities($html) {
+        // Replace common problematic entity sequences
+        $html = str_replace(['&#34;', '&#34'], '"', $html);
+        $html = str_replace(['&#39;', '&#39'], "'", $html);
+        
+        return $html;
     }
 } 
